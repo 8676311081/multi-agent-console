@@ -50,6 +50,9 @@ final class AppModel {
     private let codexRolloutWatcher = CodexRolloutWatcher()
 
     @ObservationIgnored
+    private let codexRolloutDiscovery = CodexRolloutDiscovery()
+
+    @ObservationIgnored
     private var codexSessionPersistenceTask: Task<Void, Never>?
 
     init() {
@@ -190,6 +193,7 @@ final class AppModel {
         }
 
         restorePersistedCodexSessions()
+        discoverRecentCodexSessions()
         hooksBinaryURL = HooksBinaryLocator.locate()
         refreshCodexHookStatus()
         refreshCodexRolloutTracking()
@@ -417,6 +421,19 @@ final class AppModel {
         }
     }
 
+    private func discoverRecentCodexSessions() {
+        let records = codexRolloutDiscovery.discoverRecentSessions()
+        guard !records.isEmpty else {
+            return
+        }
+
+        let mergedSessions = mergeDiscoveredSessions(records.map(\.session))
+        state = SessionState(sessions: mergedSessions)
+        synchronizeSelection()
+        scheduleCodexSessionPersistence()
+        lastActionMessage = "Discovered \(records.count) recent Codex session(s) from local rollouts."
+    }
+
     private func refreshCodexRolloutTracking() {
         let targets = state.sessions.compactMap { session -> CodexRolloutWatchTarget? in
             guard session.tool == .codex,
@@ -432,6 +449,60 @@ final class AppModel {
         }
 
         codexRolloutWatcher.sync(targets: targets)
+    }
+
+    private func mergeDiscoveredSessions(_ discoveredSessions: [AgentSession]) -> [AgentSession] {
+        var mergedByID = Dictionary(uniqueKeysWithValues: state.sessions.map { ($0.id, $0) })
+
+        for discovered in discoveredSessions {
+            if let existing = mergedByID[discovered.id] {
+                mergedByID[discovered.id] = merge(discovered: discovered, into: existing)
+            } else {
+                mergedByID[discovered.id] = discovered
+            }
+        }
+
+        return Array(mergedByID.values)
+    }
+
+    private func merge(discovered: AgentSession, into existing: AgentSession) -> AgentSession {
+        var merged = existing
+        let discoveredIsNewer = discovered.updatedAt >= existing.updatedAt
+
+        if discoveredIsNewer {
+            merged.title = discovered.title
+            merged.phase = discovered.phase
+            merged.summary = discovered.summary
+            merged.updatedAt = discovered.updatedAt
+            merged.permissionRequest = discovered.permissionRequest
+            merged.questionPrompt = discovered.questionPrompt
+        }
+
+        merged.origin = existing.origin ?? discovered.origin
+        merged.jumpTarget = existing.jumpTarget ?? discovered.jumpTarget
+        merged.codexMetadata = mergeCodexMetadata(existing.codexMetadata, discovered.codexMetadata)
+
+        return merged
+    }
+
+    private func mergeCodexMetadata(
+        _ existing: CodexSessionMetadata?,
+        _ discovered: CodexSessionMetadata?
+    ) -> CodexSessionMetadata? {
+        guard let existing else {
+            return discovered?.isEmpty == true ? nil : discovered
+        }
+
+        guard let discovered else {
+            return existing.isEmpty ? nil : existing
+        }
+
+        let merged = CodexSessionMetadata(
+            transcriptPath: discovered.transcriptPath ?? existing.transcriptPath,
+            lastAssistantMessage: discovered.lastAssistantMessage ?? existing.lastAssistantMessage,
+            currentTool: discovered.currentTool ?? existing.currentTool
+        )
+        return merged.isEmpty ? nil : merged
     }
 
     private func scheduleCodexSessionPersistence() {

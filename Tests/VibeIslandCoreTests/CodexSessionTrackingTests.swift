@@ -203,6 +203,83 @@ struct CodexSessionTrackingTests {
         #expect(events.contains(where: { $0.trackedActivityUpdate?.summary == "Inspecting README." }))
         #expect(events.contains(where: { $0.trackedSessionCompletion?.summary == "Finished the rollout tracking slice." }))
     }
+
+    @Test
+    func codexRolloutDiscoveryFindsRecentSessionsFromLocalRollouts() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vibe-island-discovery-\(UUID().uuidString)", isDirectory: true)
+        let recentDirectoryURL = rootURL.appendingPathComponent("2026/04/02", isDirectory: true)
+        let staleDirectoryURL = rootURL.appendingPathComponent("2026/03/30", isDirectory: true)
+        let recentRolloutURL = recentDirectoryURL.appendingPathComponent("rollout-recent.jsonl")
+        let staleRolloutURL = staleDirectoryURL.appendingPathComponent("rollout-stale.jsonl")
+        let now = Date(timeIntervalSince1970: 1_743_555_200)
+
+        try FileManager.default.createDirectory(at: recentDirectoryURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: staleDirectoryURL, withIntermediateDirectories: true)
+
+        defer {
+            try? FileManager.default.removeItem(at: rootURL)
+        }
+
+        let recentLines = [
+            sessionMetaLine(
+                sessionID: "codex-session-1",
+                timestamp: "2026-04-02T04:03:44.000Z",
+                cwd: "/Users/wangruobing/Personal/vibe-island"
+            ),
+            rolloutLine(
+                timestamp: "2026-04-02T04:03:45.000Z",
+                type: "response_item",
+                payload: [
+                    "type": "function_call",
+                    "name": "exec_command",
+                ]
+            ),
+            rolloutLine(
+                timestamp: "2026-04-02T04:03:46.000Z",
+                type: "event_msg",
+                payload: [
+                    "type": "agent_message",
+                    "message": "Inspecting the local rollout files.",
+                ]
+            ),
+        ]
+        let staleLines = [
+            sessionMetaLine(
+                sessionID: "codex-session-stale",
+                timestamp: "2026-03-30T04:03:44.000Z",
+                cwd: "/Users/wangruobing/Personal/old-repo"
+            ),
+        ]
+
+        try recentLines.joined(separator: "\n").appending("\n").write(to: recentRolloutURL, atomically: true, encoding: .utf8)
+        try staleLines.joined(separator: "\n").appending("\n").write(to: staleRolloutURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: recentRolloutURL.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-172_800)], ofItemAtPath: staleRolloutURL.path)
+
+        let discovery = CodexRolloutDiscovery(
+            rootURL: rootURL,
+            fileManager: .default,
+            maxAge: 86_400,
+            maxFiles: 10
+        )
+
+        let records = discovery.discoverRecentSessions(now: now)
+
+        #expect(records.count == 1)
+        #expect(records.first?.sessionID == "codex-session-1")
+        #expect(records.first?.title == "Codex · vibe-island")
+        #expect(records.first?.summary == "Inspecting the local rollout files.")
+        #expect(records.first?.phase == .running)
+        #expect(
+            records.first?.codexMetadata?.transcriptPath.map {
+                URL(fileURLWithPath: $0).resolvingSymlinksInPath().path
+            } == recentRolloutURL.resolvingSymlinksInPath().path
+        )
+        #expect(records.first?.codexMetadata?.lastAssistantMessage == "Inspecting the local rollout files.")
+        #expect(records.first?.codexMetadata?.currentTool == "exec_command")
+        #expect(records.first?.origin == .live)
+    }
 }
 
 private actor EventRecorder {
@@ -243,6 +320,24 @@ private func rolloutLine(
     ]
     let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     return String(decoding: data, as: UTF8.self)
+}
+
+private func sessionMetaLine(
+    sessionID: String,
+    timestamp: String,
+    cwd: String
+) -> String {
+    rolloutLine(
+        timestamp: timestamp,
+        type: "session_meta",
+        payload: [
+            "id": sessionID,
+            "timestamp": timestamp,
+            "cwd": cwd,
+            "originator": "codex-tui",
+            "source": "cli",
+        ]
+    )
 }
 
 private extension AgentEvent {

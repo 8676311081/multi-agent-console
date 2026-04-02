@@ -40,7 +40,7 @@ The current bridge server still lives inside the app process for convenience, bu
 3. The helper forwards hook payloads to the app bridge over a Unix socket.
 4. The app consumes normalized `AgentEvent` values from that socket and sends approval commands back over the same bridge.
 5. A separate setup CLI owns `config.toml` and `hooks.json` edits so installation and rollback stay explicit and reversible.
-6. The app persists recent Codex sessions into a local session cache and follows `transcriptPath` rollout files to enrich state after the initial hook ingress.
+6. The app persists recent Codex sessions into a local session cache, scans recent `~/.codex/sessions` rollouts on launch for cold-start recovery, and follows `transcriptPath` rollout files to enrich state after the initial hook ingress.
 
 The supported surface area is intentionally narrower than the current source tree might suggest:
 
@@ -54,10 +54,11 @@ The hook helper also enriches Codex payloads with local runtime hints from the t
 
 For `PreToolUse`, the hook helper waits for the bridge response. If the island denies the request, the helper writes the blocking JSON shape that Codex already understands. If the app is unavailable, the helper fails open so the terminal flow remains unchanged.
 
-The current Codex slice is now two-stage:
+The current Codex slice is now three-stage:
 
-1. hooks bootstrap or refresh the session identity, terminal mapping, and transcript path
-2. a local rollout watcher tails the transcript JSONL file to recover richer state such as assistant commentary, current tool, and turn completion
+1. startup discovery scans recent local rollout JSONL files to recover existing Codex sessions before any new hook fires
+2. hooks bootstrap or refresh the session identity, terminal mapping, and transcript path
+3. a local rollout watcher tails the transcript JSONL file to recover richer state such as assistant commentary, current tool, and turn completion
 
 ## Suggested Build Order
 

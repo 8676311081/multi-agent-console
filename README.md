@@ -52,7 +52,7 @@ swift build
 open Package.swift
 ```
 
-Open the package in Xcode to run the macOS app target. The app now starts an empty local bridge and waits for real Codex hook events.
+Open the package in Xcode to run the macOS app target. On launch, the app now restores its local cache, scans recent `~/.codex/sessions/**/rollout-*.jsonl` files for existing Codex sessions, and then starts the live bridge for new hook events.
 
 The control center now also shows live Codex hook install status from `~/.codex`, and can install or uninstall the managed hook entries directly if it can locate a local `VibeIslandHooks` executable.
 
@@ -163,7 +163,7 @@ The helper reads the Codex hook payload from `stdin`, forwards it to the app bri
 
 The bridge also respects non-interactive Codex permission modes such as `dontAsk` and `bypassPermissions`, so the island does not insert extra approval prompts when Codex itself is configured to run through.
 
-The app now also keeps a small local Codex session cache under `~/Library/Application Support/open-vibe-island/session-terminals.json` and follows `transcriptPath` rollout files when available. That lets the island recover recent Codex sessions after relaunch and keep tracking richer state such as the latest assistant message, current tool, and turn completion beyond the narrow hook edge. The island surface and control center now both prioritize that enriched rollout state instead of only showing the last hook summary line.
+The app now also keeps a small local Codex session cache under `~/Library/Application Support/open-vibe-island/session-terminals.json`, scans recent `~/.codex/sessions` rollout files on launch, and follows `transcriptPath` rollout files when available. That lets the island recover recent Codex sessions even if they started before the app launched, and keep tracking richer state such as the latest assistant message, current tool, and turn completion beyond the narrow hook edge. The island surface and control center now both prioritize that enriched rollout state instead of only showing the last hook summary line.
 
 ## Jump Back
 

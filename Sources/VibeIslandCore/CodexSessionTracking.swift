@@ -138,6 +138,180 @@ public final class CodexSessionStore: @unchecked Sendable {
     }
 }
 
+public final class CodexRolloutDiscovery: @unchecked Sendable {
+    private struct Candidate {
+        var fileURL: URL
+        var modifiedAt: Date
+    }
+
+    private struct SessionMeta {
+        var sessionID: String
+        var cwd: String
+        var timestamp: Date?
+
+        var workspaceName: String {
+            let workspace = URL(fileURLWithPath: cwd).lastPathComponent
+            return workspace.isEmpty ? "Workspace" : workspace
+        }
+
+        var sessionTitle: String {
+            "Codex · \(workspaceName)"
+        }
+
+        var defaultSummary: String {
+            "Started Codex session in \(workspaceName)."
+        }
+    }
+
+    public static var defaultRootURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/sessions", isDirectory: true)
+    }
+
+    private let rootURL: URL
+    private let fileManager: FileManager
+    private let maxAge: TimeInterval
+    private let maxFiles: Int
+
+    public init(
+        rootURL: URL = CodexRolloutDiscovery.defaultRootURL,
+        fileManager: FileManager = .default,
+        maxAge: TimeInterval = 86_400,
+        maxFiles: Int = 40
+    ) {
+        self.rootURL = rootURL
+        self.fileManager = fileManager
+        self.maxAge = maxAge
+        self.maxFiles = maxFiles
+    }
+
+    public func discoverRecentSessions(now: Date = .now) -> [CodexTrackedSessionRecord] {
+        guard fileManager.fileExists(atPath: rootURL.path),
+              let enumerator = fileManager.enumerator(
+                at: rootURL,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return []
+        }
+
+        let cutoff = now.addingTimeInterval(-maxAge)
+        var candidates: [Candidate] = []
+
+        for case let fileURL as URL in enumerator {
+            guard fileURL.lastPathComponent.hasPrefix("rollout-"),
+                  fileURL.pathExtension == "jsonl" else {
+                continue
+            }
+
+            guard let resourceValues = try? fileURL.resourceValues(
+                forKeys: [.contentModificationDateKey, .isRegularFileKey]
+            ),
+            resourceValues.isRegularFile == true else {
+                continue
+            }
+
+            let modifiedAt = resourceValues.contentModificationDate ?? .distantPast
+            guard modifiedAt >= cutoff else {
+                continue
+            }
+
+            candidates.append(Candidate(fileURL: fileURL, modifiedAt: modifiedAt))
+        }
+
+        let recentCandidates = candidates
+            .sorted { lhs, rhs in
+                if lhs.modifiedAt == rhs.modifiedAt {
+                    return lhs.fileURL.lastPathComponent.localizedStandardCompare(rhs.fileURL.lastPathComponent) == .orderedDescending
+                }
+
+                return lhs.modifiedAt > rhs.modifiedAt
+            }
+            .prefix(maxFiles)
+
+        var recordsByID: [String: CodexTrackedSessionRecord] = [:]
+        for candidate in recentCandidates {
+            guard let record = discoverRecord(fileURL: candidate.fileURL, modifiedAt: candidate.modifiedAt) else {
+                continue
+            }
+
+            if let existing = recordsByID[record.sessionID], existing.updatedAt >= record.updatedAt {
+                continue
+            }
+
+            recordsByID[record.sessionID] = record
+        }
+
+        return recordsByID.values.sorted { lhs, rhs in
+            if lhs.updatedAt == rhs.updatedAt {
+                return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+            }
+
+            return lhs.updatedAt > rhs.updatedAt
+        }
+    }
+
+    private func discoverRecord(fileURL: URL, modifiedAt: Date) -> CodexTrackedSessionRecord? {
+        guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return nil
+        }
+
+        let lines = contents
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+        guard !lines.isEmpty,
+              let sessionMeta = sessionMeta(from: lines) else {
+            return nil
+        }
+
+        let snapshot = CodexRolloutReducer.snapshot(for: lines)
+        let summary = snapshot.summary ?? sessionMeta.defaultSummary
+        let updatedAt = snapshot.updatedAt ?? sessionMeta.timestamp ?? modifiedAt
+        let metadata = CodexSessionMetadata(
+            transcriptPath: fileURL.path,
+            lastAssistantMessage: snapshot.lastAssistantMessage,
+            currentTool: snapshot.currentTool
+        )
+
+        return CodexTrackedSessionRecord(
+            sessionID: sessionMeta.sessionID,
+            title: sessionMeta.sessionTitle,
+            origin: .live,
+            summary: summary,
+            phase: snapshot.phase,
+            updatedAt: updatedAt,
+            codexMetadata: metadata
+        )
+    }
+
+    private func sessionMeta(from lines: [String]) -> SessionMeta? {
+        for line in lines {
+            guard let object = codexRolloutJSONObject(for: line),
+                  object["type"] as? String == "session_meta" else {
+                continue
+            }
+
+            let payload = object["payload"] as? [String: Any] ?? [:]
+            guard let sessionID = payload["id"] as? String,
+                  !sessionID.isEmpty,
+                  let cwd = payload["cwd"] as? String,
+                  !cwd.isEmpty else {
+                continue
+            }
+
+            return SessionMeta(
+                sessionID: sessionID,
+                cwd: cwd,
+                timestamp: codexRolloutParseTimestamp(
+                    (payload["timestamp"] as? String) ?? (object["timestamp"] as? String)
+                )
+            )
+        }
+
+        return nil
+    }
+}
+
 public struct CodexRolloutWatchTarget: Equatable, Sendable {
     public var sessionID: String
     public var transcriptPath: String
@@ -363,23 +537,11 @@ public enum CodexRolloutReducer {
     }
 
     private static func jsonObject(for line: String) -> [String: Any]? {
-        guard let data = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data),
-              let dictionary = object as? [String: Any] else {
-            return nil
-        }
-
-        return dictionary
+        codexRolloutJSONObject(for: line)
     }
 
     private static func parseTimestamp(_ string: String?) -> Date? {
-        guard let string else {
-            return nil
-        }
-
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: string)
+        codexRolloutParseTimestamp(string)
     }
 }
 
@@ -536,4 +698,24 @@ public final class CodexRolloutWatcher: @unchecked Sendable {
 
         return lines
     }
+}
+
+private func codexRolloutJSONObject(for line: String) -> [String: Any]? {
+    guard let data = line.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data),
+          let dictionary = object as? [String: Any] else {
+        return nil
+    }
+
+    return dictionary
+}
+
+private func codexRolloutParseTimestamp(_ string: String?) -> Date? {
+    guard let string else {
+        return nil
+    }
+
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.date(from: string)
 }
