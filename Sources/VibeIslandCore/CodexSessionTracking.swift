@@ -799,7 +799,7 @@ public final class CodexRolloutWatcher: @unchecked Sendable {
     public init(
         pollInterval: TimeInterval = 0.75,
         initialReadLimit: UInt64 = 128 * 1_024,
-        initialPromptBootstrapLimit: UInt64 = 1_024 * 1_024
+        initialPromptBootstrapLimit: UInt64 = 4 * 1_024 * 1_024
     ) {
         self.pollInterval = pollInterval
         self.initialReadLimit = initialReadLimit
@@ -985,6 +985,25 @@ public final class CodexRolloutWatcher: @unchecked Sendable {
             return CodexRolloutSnapshot()
         }
 
+        let initialPrompt = bootstrapInitialPrompt(
+            fileHandle: fileHandle,
+            readLimit: readLimit
+        )
+        let lastPrompt = bootstrapLastPrompt(
+            fileHandle: fileHandle,
+            fileSize: fileSize,
+            readLimit: readLimit
+        )
+        return CodexRolloutSnapshot(
+            initialUserPrompt: initialPrompt,
+            lastUserPrompt: lastPrompt ?? initialPrompt
+        )
+    }
+
+    private func bootstrapInitialPrompt(
+        fileHandle: FileHandle,
+        readLimit: UInt64
+    ) -> String? {
         do {
             try fileHandle.seek(toOffset: 0)
             var buffer = Data()
@@ -1008,12 +1027,33 @@ public final class CodexRolloutWatcher: @unchecked Sendable {
                 lines.forEach { CodexRolloutReducer.apply(line: $0, to: &snapshot) }
             }
 
-            return CodexRolloutSnapshot(
-                initialUserPrompt: snapshot.initialUserPrompt,
-                lastUserPrompt: snapshot.lastUserPrompt
-            )
+            return snapshot.initialUserPrompt
         } catch {
-            return CodexRolloutSnapshot()
+            return nil
+        }
+    }
+
+    private func bootstrapLastPrompt(
+        fileHandle: FileHandle,
+        fileSize: UInt64,
+        readLimit: UInt64
+    ) -> String? {
+        do {
+            let startOffset = fileSize > readLimit ? fileSize - readLimit : 0
+            try fileHandle.seek(toOffset: startOffset)
+            var buffer = try fileHandle.readToEnd() ?? Data()
+            guard !buffer.isEmpty else {
+                return nil
+            }
+
+            if startOffset > 0 {
+                trimLeadingPartialLine(from: &buffer)
+            }
+
+            let tailSnapshot = CodexRolloutReducer.snapshot(for: completeLines(from: &buffer))
+            return tailSnapshot.lastUserPrompt
+        } catch {
+            return nil
         }
     }
 

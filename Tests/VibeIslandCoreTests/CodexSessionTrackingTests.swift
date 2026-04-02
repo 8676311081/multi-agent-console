@@ -371,6 +371,27 @@ struct CodexSessionTrackingTests {
             try? FileManager.default.removeItem(at: rootURL)
         }
 
+        let fillerBeforeLatePrompt = (0..<8).map { index in
+            rolloutLine(
+                timestamp: String(format: "2026-04-02T14:37:%02d.000Z", 29 + index),
+                type: "event_msg",
+                payload: [
+                    "type": "agent_message",
+                    "message": "Filler analysis \(index): \(String(repeating: "segment-", count: 16))",
+                ]
+            )
+        }
+        let fillerAfterLatePrompt = (0..<8).map { index in
+            rolloutLine(
+                timestamp: String(format: "2026-04-02T14:38:%02d.000Z", 10 + index),
+                type: "event_msg",
+                payload: [
+                    "type": "agent_message",
+                    "message": "Post-user filler \(index): \(String(repeating: "segment-", count: 16))",
+                ]
+            )
+        }
+
         let lines = [
             rolloutLine(
                 timestamp: "2026-04-02T14:37:27.780Z",
@@ -404,18 +425,24 @@ struct CodexSessionTrackingTests {
                     ],
                 ]
             ),
-        ] + (0..<8).map { index in
+        ] + fillerBeforeLatePrompt + [
             rolloutLine(
-                timestamp: String(format: "2026-04-02T14:37:%02d.000Z", 29 + index),
-                type: "event_msg",
+                timestamp: "2026-04-02T14:38:05.000Z",
+                type: "response_item",
                 payload: [
-                    "type": "agent_message",
-                    "message": "Filler analysis \(index): \(String(repeating: "segment-", count: 16))",
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "input_text",
+                            "text": "时间你看图对比吧 我说的不对",
+                        ],
+                    ],
                 ]
-            )
-        } + [
+            ),
+        ] + fillerAfterLatePrompt + [
             rolloutLine(
-                timestamp: "2026-04-02T14:38:00.000Z",
+                timestamp: "2026-04-02T14:38:30.000Z",
                 type: "response_item",
                 payload: [
                     "type": "message",
@@ -458,7 +485,7 @@ struct CodexSessionTrackingTests {
             $0.trackedMetadataUpdate?.codexMetadata.initialUserPrompt == "读一下这篇论文 https://arxiv.org/html/2603.28052v1，然后对比一下 autoresearch 的实现。"
         }))
         #expect(events.contains(where: {
-            $0.trackedMetadataUpdate?.codexMetadata.lastUserPrompt == "读一下这篇论文 https://arxiv.org/html/2603.28052v1，然后对比一下 autoresearch 的实现。"
+            $0.trackedMetadataUpdate?.codexMetadata.lastUserPrompt == "时间你看图对比吧 我说的不对"
         }))
         #expect(events.contains(where: {
             $0.trackedActivityUpdate?.summary == "我先读论文内容并在仓库里定位 autoresearch 相关实现，再把两边的机制做一版对照。"
