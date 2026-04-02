@@ -230,9 +230,14 @@ struct SessionStateTests {
             .compactMap { $0["hooks"] as? [[String: Any]] }
             .flatMap { $0 }
             .compactMap { $0["command"] as? String } ?? []
+        let managedStopHook = stopGroups?
+            .compactMap { $0["hooks"] as? [[String: Any]] }
+            .flatMap { $0 }
+            .first(where: { $0["command"] as? String == "'/tmp/VibeIslandHooks'" })
 
         #expect(stopCommands.contains("/usr/bin/true"))
         #expect(stopCommands.contains("'/tmp/VibeIslandHooks'"))
+        #expect(managedStopHook?["statusMessage"] == nil)
 
         let preToolGroups = hooks?["PreToolUse"] as? [[String: Any]]
         #expect(preToolGroups?.contains(where: { $0["matcher"] as? String == "Bash" }) == true)
@@ -367,6 +372,14 @@ struct SessionStateTests {
         #expect(installed.featureFlagEnabled)
         #expect(installed.managedHooksPresent)
         #expect(installed.manifest?.hookCommand == CodexHookInstaller.hookCommand(for: hooksBinaryURL.path))
+        let hooksData = try Data(contentsOf: installed.hooksURL)
+        let installedHooks = try jsonObject(from: hooksData)
+        let installedStopGroups = (installedHooks["hooks"] as? [String: Any])?["Stop"] as? [[String: Any]]
+        let installedManagedHook = installedStopGroups?
+            .compactMap { $0["hooks"] as? [[String: Any]] }
+            .flatMap { $0 }
+            .first(where: { $0["command"] as? String == CodexHookInstaller.hookCommand(for: hooksBinaryURL.path) })
+        #expect(installedManagedHook?["statusMessage"] == nil)
 
         let reloaded = try manager.status(hooksBinaryURL: hooksBinaryURL)
         #expect(reloaded.managedHooksPresent)

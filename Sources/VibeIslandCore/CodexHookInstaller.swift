@@ -54,6 +54,7 @@ public enum CodexHookInstallerError: Error, LocalizedError {
 }
 
 public enum CodexHookInstaller {
+    // Keep matching the legacy status message so uninstall/status still recognize older installs.
     public static let managedStatusMessage = "Managed by Vibe Island"
     public static let managedTimeout = 45
 
@@ -260,7 +261,6 @@ public enum CodexHookInstaller {
                 "type": "command",
                 "command": hookCommand,
                 "timeout": managedTimeout,
-                "statusMessage": managedStatusMessage,
             ]]
         ]
 
