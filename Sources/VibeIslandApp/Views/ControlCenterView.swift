@@ -48,6 +48,75 @@ struct ControlCenterView: View {
                 }
             }
 
+            usageDebugCard(
+                title: "Claude Usage",
+                statusTitle: model.claudeUsageStatusTitle,
+                statusSummary: model.claudeUsageStatusSummary,
+                isActive: model.claudeUsageInstalled || model.claudeStatusLineStatus?.hasConflictingStatusLine == true,
+                accentColor: model.claudeUsageInstalled ? .mint : (model.claudeStatusLineStatus?.hasConflictingStatusLine == true ? .orange : .blue)
+            ) {
+                if let summary = model.claudeUsageSummaryText {
+                    metadataRow(title: "usage", value: summary)
+                }
+
+                if let status = model.claudeStatusLineStatus {
+                    metadataRow(title: "settings", value: status.settingsURL.path)
+                    metadataRow(title: "script", value: status.scriptURL.path)
+                    metadataRow(title: "cache", value: status.cacheURL.path)
+                }
+            } actions: {
+                HStack(spacing: 10) {
+                    Button("Refresh") {
+                        model.refreshClaudeUsageState()
+                    }
+                    .buttonStyle(DebugActionButtonStyle(kind: .secondary))
+
+                    Button(model.claudeUsageInstalled ? "Remove Bridge" : "Install Bridge") {
+                        if model.claudeUsageInstalled {
+                            model.uninstallClaudeUsageBridge()
+                        } else {
+                            model.installClaudeUsageBridge()
+                        }
+                    }
+                    .buttonStyle(DebugActionButtonStyle(kind: .primary))
+                    .disabled(model.isClaudeUsageSetupBusy || model.claudeStatusLineStatus?.hasConflictingStatusLine == true)
+                }
+            }
+
+            usageDebugCard(
+                title: "Codex Usage",
+                statusTitle: model.codexUsageStatusTitle,
+                statusSummary: model.codexUsageStatusSummary,
+                isActive: model.codexUsageSnapshot?.isEmpty == false,
+                accentColor: model.codexUsageSnapshot?.isEmpty == false ? .mint : .blue
+            ) {
+                if let summary = model.codexUsageSummaryText {
+                    metadataRow(title: "usage", value: summary)
+                }
+
+                if let snapshot = model.codexUsageSnapshot {
+                    metadataRow(title: "latest rollout", value: snapshot.sourceFilePath)
+
+                    if let planType = snapshot.planType {
+                        metadataRow(title: "plan", value: planType)
+                    }
+
+                    if let capturedAt = snapshot.capturedAt {
+                        metadataRow(
+                            title: "captured",
+                            value: capturedAt.formatted(date: .abbreviated, time: .standard)
+                        )
+                    }
+                }
+            } actions: {
+                HStack(spacing: 10) {
+                    Button("Refresh") {
+                        model.refreshCodexUsageState()
+                    }
+                    .buttonStyle(DebugActionButtonStyle(kind: .secondary))
+                }
+            }
+
             actionCard
             transcriptCard
             liveOverlayCard
@@ -252,6 +321,48 @@ struct ControlCenterView: View {
         previewModel.loadDebugSnapshot(snapshot)
     }
 
+    private func usageDebugCard<Content: View, Actions: View>(
+        title: String,
+        statusTitle: String,
+        statusSummary: String,
+        isActive: Bool,
+        accentColor: Color,
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder actions: () -> Actions
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.58))
+
+                    Text(statusTitle)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+
+                    Text(statusSummary)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+
+                Circle()
+                    .fill(isActive ? accentColor : accentColor.opacity(0.7))
+                    .frame(width: 10, height: 10)
+                    .padding(.top, 4)
+            }
+
+            content()
+            actions()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(debugCardBackground)
+    }
+
     private func debugMetricRow(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
@@ -272,6 +383,20 @@ struct ControlCenterView: View {
             Text(value)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white.opacity(0.75))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func metadataRow(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.38))
+
+            Text(value)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.72))
+                .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
