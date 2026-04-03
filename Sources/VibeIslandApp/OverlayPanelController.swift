@@ -36,7 +36,7 @@ final class OverlayPanelController {
         self.model = model
         let panel = self.panel ?? makePanel(model: model)
         self.panel = panel
-        positionPanel(panel, preferredScreenID: preferredScreenID)
+        positionPanel(panel, preferredScreenID: preferredScreenID, animated: false)
         panel.orderFrontRegardless()
         panel.ignoresMouseEvents = true
         panel.acceptsMouseMovedEvents = false
@@ -47,7 +47,7 @@ final class OverlayPanelController {
         self.model = model
         let panel = self.panel ?? makePanel(model: model)
         self.panel = panel
-        let diagnostics = positionPanel(panel, preferredScreenID: preferredScreenID)
+        let diagnostics = positionPanel(panel, preferredScreenID: preferredScreenID, animated: true)
         panel.makeKeyAndOrderFront(nil)
         panel.ignoresMouseEvents = false
         panel.acceptsMouseMovedEvents = true
@@ -78,7 +78,7 @@ final class OverlayPanelController {
             return placementDiagnostics(preferredScreenID: preferredScreenID)
         }
 
-        return positionPanel(panel, preferredScreenID: preferredScreenID)
+        return positionPanel(panel, preferredScreenID: preferredScreenID, animated: true)
     }
 
     func placementDiagnostics(preferredScreenID: String?) -> OverlayPlacementDiagnostics? {
@@ -125,19 +125,43 @@ final class OverlayPanelController {
     // MARK: - Positioning
 
     @discardableResult
-    private func positionPanel(_ panel: NSPanel, preferredScreenID: String?) -> OverlayPlacementDiagnostics? {
+    private func positionPanel(
+        _ panel: NSPanel,
+        preferredScreenID: String?,
+        animated: Bool
+    ) -> OverlayPlacementDiagnostics? {
         guard let screen = resolveTargetScreen(preferredScreenID: preferredScreenID) else {
             return nil
         }
 
         let windowFrame = panelFrame(for: model, on: screen)
-        panel.setFrame(windowFrame, display: true)
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = panelAnimationDuration(for: model?.notchStatus)
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                context.allowsImplicitAnimation = true
+                panel.animator().setFrame(windowFrame, display: true)
+            }
+        } else {
+            panel.setFrame(windowFrame, display: true)
+        }
         computeNotchRect(screen: screen)
 
         return OverlayDisplayResolver.diagnostics(
             preferredScreenID: preferredScreenID,
             panelSize: panel.frame.size
         )
+    }
+
+    private func panelAnimationDuration(for status: NotchStatus?) -> TimeInterval {
+        switch status {
+        case .opened:
+            0.34
+        case .closed, .popping:
+            0.26
+        case nil:
+            0
+        }
     }
 
     private func computeNotchRect(screen: NSScreen?) {
@@ -270,7 +294,13 @@ final class OverlayPanelController {
     }
 
     func contentRect(for model: AppModel, in bounds: NSRect) -> NSRect? {
-        bounds
+        let insets = panelShadowInsets(for: model)
+        return NSRect(
+            x: bounds.minX + insets.horizontal,
+            y: bounds.minY + insets.bottom,
+            width: max(0, bounds.width - (insets.horizontal * 2)),
+            height: max(0, bounds.height - insets.bottom)
+        )
     }
 
     private func panelFrame(for model: AppModel?, on screen: NSScreen) -> NSRect {
@@ -284,23 +314,40 @@ final class OverlayPanelController {
     }
 
     private func panelSize(for model: AppModel?, on screen: NSScreen) -> CGSize {
+        let insets = panelShadowInsets(for: model)
+
         guard let model else {
             return CGSize(
-                width: openedPanelWidth(for: screen) + Self.openedContentWidthPadding,
-                height: screen.notchSize.height + Self.openedEmptyStateHeight + Self.openedContentBottomPadding
+                width: openedPanelWidth(for: screen) + Self.openedContentWidthPadding + (insets.horizontal * 2),
+                height: screen.notchSize.height + Self.openedEmptyStateHeight + Self.openedContentBottomPadding + insets.bottom
             )
         }
 
         switch model.notchStatus {
         case .opened:
             return CGSize(
-                width: openedPanelWidth(for: screen) + Self.openedContentWidthPadding,
-                height: screen.notchSize.height + openedContentHeight(for: model) + Self.openedContentBottomPadding
+                width: openedPanelWidth(for: screen) + Self.openedContentWidthPadding + (insets.horizontal * 2),
+                height: screen.notchSize.height + openedContentHeight(for: model) + Self.openedContentBottomPadding + insets.bottom
             )
         case .closed, .popping:
             return CGSize(
-                width: closedPanelWidth(for: model, on: screen),
-                height: screen.islandClosedHeight
+                width: closedPanelWidth(for: model, on: screen) + (insets.horizontal * 2),
+                height: screen.islandClosedHeight + insets.bottom
+            )
+        }
+    }
+
+    private func panelShadowInsets(for model: AppModel?) -> (horizontal: CGFloat, bottom: CGFloat) {
+        switch model?.notchStatus {
+        case .opened, nil:
+            return (
+                horizontal: IslandChromeMetrics.openedShadowHorizontalInset,
+                bottom: IslandChromeMetrics.openedShadowBottomInset
+            )
+        case .closed, .popping:
+            return (
+                horizontal: IslandChromeMetrics.closedShadowHorizontalInset,
+                bottom: IslandChromeMetrics.closedShadowBottomInset
             )
         }
     }

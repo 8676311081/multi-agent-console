@@ -99,66 +99,64 @@ struct IslandPanelView: View {
 
     @ViewBuilder
     private func notchContent(availableSize: CGSize) -> some View {
+        let panelShadowHorizontalInset = isOpened
+            ? IslandChromeMetrics.openedShadowHorizontalInset
+            : IslandChromeMetrics.closedShadowHorizontalInset
+        let panelShadowBottomInset = isOpened
+            ? IslandChromeMetrics.openedShadowBottomInset
+            : IslandChromeMetrics.closedShadowBottomInset
+        let layoutWidth = max(0, availableSize.width - (panelShadowHorizontalInset * 2))
+        let layoutHeight = max(0, availableSize.height - panelShadowBottomInset)
         let outerHorizontalPadding: CGFloat = isOpened ? 28 : 0
         let outerBottomPadding: CGFloat = isOpened ? 14 : 0
-        let openedWidth = max(0, availableSize.width - outerHorizontalPadding)
-        let closedWidth = availableSize.width
+        let openedWidth = max(0, layoutWidth - outerHorizontalPadding)
+        let closedWidth = layoutWidth
         let currentWidth = isOpened ? openedWidth : closedWidth
-        let currentHeight = isOpened ? max(closedNotchHeight, availableSize.height - outerBottomPadding) : availableSize.height
+        let currentHeight = isOpened ? max(closedNotchHeight, layoutHeight - outerBottomPadding) : layoutHeight
+        let horizontalInset = isOpened ? 14.0 : 0.0
+        let bottomInset = isOpened ? 14.0 : 0.0
+        let surfaceWidth = currentWidth + (horizontalInset * 2)
+        let surfaceHeight = currentHeight + bottomInset
+        let surfaceShape = NotchShape(
+            topCornerRadius: isOpened ? NotchShape.openedTopRadius : NotchShape.closedTopRadius,
+            bottomCornerRadius: isOpened ? NotchShape.openedBottomRadius : NotchShape.closedBottomRadius
+        )
 
-        VStack(spacing: 0) {
-            headerRow
-                .frame(height: closedNotchHeight)
+        ZStack(alignment: .top) {
+            surfaceShape
+                .fill(Color.black)
+                .frame(width: surfaceWidth, height: surfaceHeight)
 
-            if isOpened {
-                openedContent
-                    .frame(width: openedWidth - 24)
-                    .frame(maxHeight: currentHeight - closedNotchHeight - 12, alignment: .top)
-                    .transition(
-                        .asymmetric(
-                            insertion: .scale(scale: 0.8, anchor: .top)
-                                .combined(with: .opacity)
-                                .animation(.smooth(duration: 0.35)),
-                            removal: .opacity.animation(.easeOut(duration: 0.15))
-                        )
-                    )
+            VStack(spacing: 0) {
+                headerRow
+                    .frame(height: closedNotchHeight)
+
+                if isOpened {
+                    openedContent
+                        .frame(width: openedWidth - 24)
+                        .frame(maxHeight: currentHeight - closedNotchHeight - 12, alignment: .top)
+                }
+            }
+            .frame(width: currentWidth, height: currentHeight, alignment: .top)
+            .padding(.horizontal, horizontalInset)
+            .padding(.bottom, bottomInset)
+            .clipShape(surfaceShape)
+            .overlay(alignment: .top) {
+                // Black strip to blend with physical notch at the very top
+                Rectangle()
+                    .fill(Color.black)
+                    .frame(height: 1)
+                    .padding(.horizontal, isOpened ? NotchShape.openedTopRadius : NotchShape.closedTopRadius)
+            }
+            .overlay {
+                surfaceShape
+                    .stroke(Color.white.opacity(isOpened ? 0.07 : 0.04), lineWidth: 1)
             }
         }
-        .frame(width: currentWidth, height: currentHeight, alignment: .top)
-        .padding(.horizontal, isOpened ? 14 : 0)
-        .padding(.bottom, isOpened ? 14 : 0)
-        .background(surfaceFill)
-        .clipShape(
-            NotchShape(
-                topCornerRadius: isOpened ? NotchShape.openedTopRadius : NotchShape.closedTopRadius,
-                bottomCornerRadius: isOpened ? NotchShape.openedBottomRadius : NotchShape.closedBottomRadius
-            )
-        )
-        .overlay(alignment: .top) {
-            // Black strip to blend with physical notch at the very top
-            Rectangle()
-                .fill(Color.black)
-                .frame(height: 1)
-                .padding(.horizontal, isOpened ? NotchShape.openedTopRadius : NotchShape.closedTopRadius)
-        }
-        .overlay {
-            NotchShape(
-                topCornerRadius: isOpened ? NotchShape.openedTopRadius : NotchShape.closedTopRadius,
-                bottomCornerRadius: isOpened ? NotchShape.openedBottomRadius : NotchShape.closedBottomRadius
-            )
-            .stroke(Color.white.opacity(isOpened ? 0.07 : 0.04), lineWidth: 1)
-        }
-        .compositingGroup()
-        .shadow(
-            color: .black.opacity(isOpened ? 0.20 : (isHovering ? 0.22 : 0.14)),
-            radius: isOpened ? 14 : (isHovering ? 10 : 7),
-            y: isOpened ? 10 : (isHovering ? 5 : 3)
-        )
-        .shadow(
-            color: .black.opacity(isOpened ? 0.10 : (isHovering ? 0.11 : 0.06)),
-            radius: isOpened ? 3 : 2,
-            y: 1
-        )
+        .frame(width: surfaceWidth, height: surfaceHeight, alignment: .top)
+        .scaleEffect(isOpened ? 1 : (isHovering ? IslandChromeMetrics.closedHoverScale : 1), anchor: .top)
+        .padding(.horizontal, panelShadowHorizontalInset)
+        .padding(.bottom, panelShadowBottomInset)
         .animation(isOpened ? openAnimation : closeAnimation, value: model.notchStatus)
         .animation(.smooth, value: hasClosedPresence)
         .animation(.smooth, value: expansionWidth)
