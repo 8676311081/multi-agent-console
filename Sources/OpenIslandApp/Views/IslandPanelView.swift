@@ -1473,6 +1473,12 @@ struct MenuBarContentView: View {
                 model.showSettings()
             }
 
+            #if DEBUG
+            Button("Open Debug Panel") {
+                model.showControlCenter()
+            }
+            #endif
+
             Text(model.acceptanceStatusTitle)
                 .font(.subheadline.weight(.semibold))
             Text(model.acceptanceStatusSummary)
