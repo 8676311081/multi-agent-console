@@ -1594,6 +1594,12 @@ final class AppModel {
 
     private func reconcileSessionAttachments() {
         let activeProcesses = activeAgentProcessDiscovery.discover()
+        let sanitizedSessions = sanitizeCrossToolGhosttyJumpTargets(in: state.sessions)
+        let sanitizedSessionsChanged = sanitizedSessions != state.sessions
+        if sanitizedSessionsChanged {
+            state = SessionState(sessions: sanitizedSessions)
+        }
+
         let mergedSessions = mergedWithSyntheticClaudeSessions(
             existingSessions: state.sessions,
             activeProcesses: activeProcesses
@@ -1624,7 +1630,7 @@ final class AppModel {
 
         let attachmentsChanged = state.reconcileAttachmentStates(attachmentUpdates)
         let jumpTargetsChanged = state.reconcileJumpTargets(jumpTargetUpdates)
-        guard syntheticSessionsChanged || attachmentsChanged || jumpTargetsChanged else {
+        guard sanitizedSessionsChanged || syntheticSessionsChanged || attachmentsChanged || jumpTargetsChanged else {
             if resolutionReport.isAuthoritative {
                 isResolvingInitialLiveSessions = false
             }
@@ -1638,6 +1644,24 @@ final class AppModel {
         refreshOverlayPlacementIfVisible()
         scheduleCodexSessionPersistence()
         scheduleClaudeSessionPersistence()
+    }
+
+    func sanitizeCrossToolGhosttyJumpTargets(in sessions: [AgentSession]) -> [AgentSession] {
+        sessions.map { session in
+            guard var jumpTarget = session.jumpTarget,
+                  supportedTerminalApp(for: jumpTarget.terminalApp) == "Ghostty",
+                  let hintedTool = toolHint(forGhosttyPaneTitle: jumpTarget.paneTitle),
+                  hintedTool != session.tool else {
+                return session
+            }
+
+            jumpTarget.terminalSessionID = nil
+            jumpTarget.paneTitle = sanitizedGhosttyPaneTitle(for: session)
+
+            var sanitizedSession = session
+            sanitizedSession.jumpTarget = jumpTarget
+            return sanitizedSession
+        }
     }
 
     private func markSessionAttached(for event: AgentEvent) {
@@ -2000,6 +2024,30 @@ final class AppModel {
             return "Terminal"
         default:
             return nil
+        }
+    }
+
+    private func toolHint(forGhosttyPaneTitle value: String) -> AgentTool? {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.contains("codex") {
+            return .codex
+        }
+
+        if normalized.contains("claude") {
+            return .claudeCode
+        }
+
+        return nil
+    }
+
+    private func sanitizedGhosttyPaneTitle(for session: AgentSession) -> String {
+        switch session.tool {
+        case .codex:
+            return "Codex \(session.id.prefix(8))"
+        case .claudeCode:
+            return "Claude \(session.id.prefix(8))"
+        case .geminiCLI:
+            return "Gemini \(session.id.prefix(8))"
         }
     }
 

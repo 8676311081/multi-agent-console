@@ -369,18 +369,36 @@ public extension CodexHookPayload {
 
 public extension CodexHookPayload {
     func withRuntimeContext(environment: [String: String]) -> CodexHookPayload {
+        withRuntimeContext(
+            environment: environment,
+            currentTTYProvider: { currentTTY() },
+            terminalLocatorProvider: { terminalLocator(for: $0) }
+        )
+    }
+
+    func withRuntimeContext(
+        environment: [String: String],
+        currentTTYProvider: () -> String?,
+        terminalLocatorProvider: (String) -> (sessionID: String?, tty: String?, title: String?)
+    ) -> CodexHookPayload {
         var payload = self
 
         if payload.terminalApp == nil {
             payload.terminalApp = inferTerminalApp(from: environment)
         }
 
-        if payload.terminalTTY == nil {
-            payload.terminalTTY = currentTTY()
+        if isGhosttyTerminalApp(payload.terminalApp) {
+            payload.terminalSessionID = nil
+            payload.terminalTitle = nil
         }
 
-        if let terminalApp = payload.terminalApp {
-            let locator = terminalLocator(for: terminalApp)
+        if payload.terminalTTY == nil {
+            payload.terminalTTY = currentTTYProvider()
+        }
+
+        if let terminalApp = payload.terminalApp,
+           shouldUseFocusedTerminalLocator(for: terminalApp) {
+            let locator = terminalLocatorProvider(terminalApp)
             if payload.terminalSessionID == nil {
                 payload.terminalSessionID = locator.sessionID
             }
@@ -393,6 +411,14 @@ public extension CodexHookPayload {
         }
 
         return payload
+    }
+
+    private func shouldUseFocusedTerminalLocator(for terminalApp: String) -> Bool {
+        !terminalApp.lowercased().contains("ghostty")
+    }
+
+    private func isGhosttyTerminalApp(_ terminalApp: String?) -> Bool {
+        terminalApp?.lowercased().contains("ghostty") == true
     }
 
     private func inferTerminalApp(from environment: [String: String]) -> String? {

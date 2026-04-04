@@ -383,6 +383,67 @@ struct TerminalSessionAttachmentProbeTests {
     }
 
     @Test
+    func ghosttyExactMatchPrefersRunningClaudeSessionOverNewerCompletedSession() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let probe = TerminalSessionAttachmentProbe()
+        let runningSession = AgentSession(
+            id: "claude-running",
+            title: "Claude · open-island",
+            tool: .claudeCode,
+            origin: .live,
+            attachmentState: .stale,
+            phase: .running,
+            summary: "Running Claude",
+            updatedAt: now.addingTimeInterval(-120),
+            jumpTarget: JumpTarget(
+                terminalApp: "Ghostty",
+                workspaceName: "open-island",
+                paneTitle: "claude --dangerously ~/p/open-island",
+                workingDirectory: "/tmp/open-island",
+                terminalSessionID: "ghostty-claude"
+            ),
+            claudeMetadata: ClaudeSessionMetadata(
+                transcriptPath: "/tmp/claude-running.jsonl",
+                currentTool: "Task"
+            )
+        )
+        let completedSession = AgentSession(
+            id: "claude-completed",
+            title: "Claude · open-island",
+            tool: .claudeCode,
+            origin: .live,
+            attachmentState: .stale,
+            phase: .completed,
+            summary: "Completed Claude",
+            updatedAt: now,
+            jumpTarget: JumpTarget(
+                terminalApp: "Ghostty",
+                workspaceName: "open-island",
+                paneTitle: "claude --dangerously ~/p/open-island",
+                workingDirectory: "/tmp/open-island",
+                terminalSessionID: "ghostty-claude"
+            ),
+            claudeMetadata: ClaudeSessionMetadata(
+                transcriptPath: "/tmp/claude-completed.jsonl",
+                lastAssistantMessage: "Done."
+            )
+        )
+
+        let updates = probe.attachmentStates(
+            for: [completedSession, runningSession],
+            ghosttyAvailability: .available(
+                [.init(sessionID: "ghostty-claude", workingDirectory: "/tmp/open-island", title: "claude --dangerously ~/p/open-island")],
+                appIsRunning: true
+            ),
+            terminalAvailability: .available([] as [TerminalSessionAttachmentProbe.TerminalTabSnapshot], appIsRunning: false),
+            now: now
+        )
+
+        #expect(updates["claude-running"] == .attached)
+        #expect(updates["claude-completed"] != .attached)
+    }
+
+    @Test
     func activeClaudeProcessCanFallbackToUniqueTTYMatch() {
         let now = Date(timeIntervalSince1970: 1_000)
         let probe = TerminalSessionAttachmentProbe()

@@ -847,12 +847,12 @@ struct TerminalSessionAttachmentProbe {
                 return lhsIsActive && !rhsIsActive
             }
 
-            if lhs.updatedAt != rhs.updatedAt {
-                return lhs.updatedAt > rhs.updatedAt
-            }
-
             if phasePriority(lhs.phase) != phasePriority(rhs.phase) {
                 return phasePriority(lhs.phase) > phasePriority(rhs.phase)
+            }
+
+            if lhs.updatedAt != rhs.updatedAt {
+                return lhs.updatedAt > rhs.updatedAt
             }
 
             return lhs.id.localizedStandardCompare(rhs.id) == .orderedAscending

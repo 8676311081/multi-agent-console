@@ -469,6 +469,34 @@ struct AppModelSessionListTests {
     }
 
     @Test
+    func sanitizeCrossToolGhosttyJumpTargetsClearsClaudeMisbinding() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let model = AppModel()
+        let misboundClaudeSession = AgentSession(
+            id: "e45d5e87-66d0-4f67-8399-6ebc02f3d453",
+            title: "Claude · open-island",
+            tool: .claudeCode,
+            origin: .live,
+            attachmentState: .stale,
+            phase: .running,
+            summary: "Running",
+            updatedAt: now,
+            jumpTarget: JumpTarget(
+                terminalApp: "Ghostty",
+                workspaceName: "open-island",
+                paneTitle: "codex ~/p/open-island",
+                workingDirectory: "/tmp/open-island",
+                terminalSessionID: "ghostty-codex"
+            )
+        )
+
+        let sanitized = model.sanitizeCrossToolGhosttyJumpTargets(in: [misboundClaudeSession])
+
+        #expect(sanitized.first?.jumpTarget?.terminalSessionID == nil)
+        #expect(sanitized.first?.jumpTarget?.paneTitle == "Claude e45d5e87")
+    }
+
+    @Test
     func mergedWithSyntheticClaudeSessionsSkipsSyntheticWhenAttachedClaudeAlreadyRepresentsGroup() {
         let now = Date(timeIntervalSince1970: 2_000)
         let model = AppModel()

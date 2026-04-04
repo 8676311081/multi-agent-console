@@ -117,6 +117,34 @@ struct ClaudeHooksTests {
     }
 
     @Test
+    func claudeGhosttyRuntimeContextDoesNotTrustFocusedTerminalLocator() {
+        let payload = ClaudeHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .sessionStart,
+            sessionID: "claude-session-1",
+            terminalSessionID: "ghostty-frontmost",
+            terminalTitle: "codex ~/tmp/other-worktree"
+        )
+
+        let inferredGhostty = payload.withRuntimeContext(
+            environment: ["TERM_PROGRAM": "ghostty"],
+            currentTTYProvider: { "/dev/ttys031" },
+            terminalLocatorProvider: { _ in
+                (
+                    sessionID: "ghostty-frontmost",
+                    tty: nil,
+                    title: "codex ~/tmp/other-worktree"
+                )
+            }
+        )
+
+        #expect(inferredGhostty.terminalApp == "Ghostty")
+        #expect(inferredGhostty.terminalTTY == "/dev/ttys031")
+        #expect(inferredGhostty.terminalSessionID == nil)
+        #expect(inferredGhostty.terminalTitle == nil)
+    }
+
+    @Test
     func claudePermissionRequestReturnsAllowDirectiveAfterApproval() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
         let server = DemoBridgeServer(socketURL: socketURL)

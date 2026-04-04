@@ -641,6 +641,8 @@ struct SessionStateTests {
             model: "gpt-5-codex",
             permissionMode: .default,
             sessionID: "session-1",
+            terminalSessionID: "ghostty-frontmost",
+            terminalTitle: "codex ~/tmp/other-worktree",
             transcriptPath: nil
         )
 
@@ -655,6 +657,35 @@ struct SessionStateTests {
         ])
         #expect(inferredGhostty.terminalApp == "Ghostty")
         #expect(inferredGhostty.defaultJumpTarget.workingDirectory == "/tmp/worktree")
+    }
+
+    @Test
+    func codexGhosttyRuntimeContextDoesNotTrustFocusedTerminalLocator() {
+        let payload = CodexHookPayload(
+            cwd: "/tmp/worktree",
+            hookEventName: .sessionStart,
+            model: "gpt-5-codex",
+            permissionMode: .default,
+            sessionID: "session-1",
+            transcriptPath: nil
+        )
+
+        let inferredGhostty = payload.withRuntimeContext(
+            environment: ["TERM_PROGRAM": "ghostty"],
+            currentTTYProvider: { "/dev/ttys022" },
+            terminalLocatorProvider: { _ in
+                (
+                    sessionID: "ghostty-frontmost",
+                    tty: nil,
+                    title: "codex ~/tmp/other-worktree"
+                )
+            }
+        )
+
+        #expect(inferredGhostty.terminalApp == "Ghostty")
+        #expect(inferredGhostty.terminalTTY == "/dev/ttys022")
+        #expect(inferredGhostty.terminalSessionID == nil)
+        #expect(inferredGhostty.terminalTitle == nil)
     }
 
     @Test
