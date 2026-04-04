@@ -40,7 +40,10 @@ final class AppModel {
         let isComplete: Bool
     }
 
-    var state = SessionState()
+    var state = SessionState() {
+        didSet { _cachedSessionBuckets = nil }
+    }
+    @ObservationIgnored private var _cachedSessionBuckets: (primary: [AgentSession], overflow: [AgentSession])?
     var selectedSessionID: String?
     var notchStatus: NotchStatus = .closed
     var notchOpenReason: NotchOpenReason?
@@ -1612,6 +1615,15 @@ final class AppModel {
     }
 
     private var sessionBuckets: (primary: [AgentSession], overflow: [AgentSession]) {
+        if let cached = _cachedSessionBuckets {
+            return cached
+        }
+        let result = computeSessionBuckets()
+        _cachedSessionBuckets = result
+        return result
+    }
+
+    private func computeSessionBuckets() -> (primary: [AgentSession], overflow: [AgentSession]) {
         let now = Date.now
         let rankedSessions = state.sessions.sorted { lhs, rhs in
             let lhsScore = displayPriority(for: lhs, now: now)
