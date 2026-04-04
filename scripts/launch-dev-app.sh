@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-build_root="$repo_root/.build/arm64-apple-macosx/release"
+build_root="$repo_root/.build/arm64-apple-macosx/debug"
 app_binary="$build_root/OpenIslandApp"
 hooks_binary="$build_root/OpenIslandHooks"
 setup_binary="$build_root/OpenIslandSetup"
@@ -15,9 +15,9 @@ bundle_binary="$bundle_dir/Contents/MacOS/OpenIslandApp"
 
 cd "$repo_root"
 
-swift build -c release --product OpenIslandApp
-swift build -c release --product OpenIslandHooks
-swift build -c release --product OpenIslandSetup
+swift build -c debug --product OpenIslandApp
+swift build -c debug --product OpenIslandHooks
+swift build -c debug --product OpenIslandSetup
 
 python3 "$brand_script"
 "$setup_binary" install --hooks-binary "$hooks_binary"
