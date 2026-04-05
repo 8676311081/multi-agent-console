@@ -210,11 +210,6 @@ struct IslandPanelView: View {
                 isHovering = hovering
             }
         }
-        .onTapGesture {
-            if !isOpened {
-                model.notchOpen(reason: .click)
-            }
-        }
     }
 
     // MARK: - Closed state

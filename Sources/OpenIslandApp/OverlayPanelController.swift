@@ -551,15 +551,10 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func mouseDown(with event: NSEvent) {
-        // Ensure the panel is key AND the app is active before SwiftUI
-        // processes the click.  With nonactivatingPanel, hover-opened
-        // panels aren't key and the app stays inactive, so SwiftUI
-        // gesture recognizers (onTapGesture) silently drop the first
-        // click.  Activating here is fine because the typical action
-        // (jumpToSession) immediately switches focus to the terminal.
-        if window?.isKeyWindow == false {
-            NSApp.activate()
-        }
+        // Ensure the panel is key before SwiftUI processes the click.
+        // With nonactivatingPanel, hover-opened panels aren't key, so
+        // SwiftUI Button may consume the first click for key acquisition
+        // instead of firing its action.
         window?.makeKey()
         super.mouseDown(with: event)
     }
