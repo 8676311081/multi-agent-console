@@ -21,10 +21,10 @@ Four targets in one Swift package (`OpenIsland`):
 ## Key data flow
 
 ### Codex path
-Codex → hooks.json → OpenIslandHooks (stdin/stdout) → Unix socket → DemoBridgeServer → AppModel → UI
+Codex → hooks.json → OpenIslandHooks (stdin/stdout) → Unix socket → BridgeServer → AppModel → UI
 
 ### Claude Code path
-Claude Code → settings.json hooks → OpenIslandHooks (stdin/stdout) → Unix socket → DemoBridgeServer.handleClaudeHook → AppModel → UI
+Claude Code → settings.json hooks → OpenIslandHooks (stdin/stdout) → Unix socket → BridgeServer.handleClaudeHook → AppModel → UI
 
 ### Session discovery (on launch)
 Restore cached sessions from registry → discover recent JSONL transcripts (`~/.claude/projects/`) → reconcile with active terminal processes → start live bridge.
@@ -120,7 +120,7 @@ Open `Package.swift` in Xcode for the app target. Requires macOS 14+, Swift 6.2.
 - `Sources/OpenIslandCore/AgentSession.swift` — Core session model and related types
 - `Sources/OpenIslandCore/AgentEvent.swift` — Event enum driving all state transitions
 - `Sources/OpenIslandCore/BridgeTransport.swift` — Unix socket protocol, codec, envelope types
-- `Sources/OpenIslandCore/DemoBridgeServer.swift` — Bridge server handling hook payloads
+- `Sources/OpenIslandCore/BridgeServer.swift` — Bridge server handling hook payloads
 - `Sources/OpenIslandCore/ClaudeHooks.swift` — Claude Code hook payload model and terminal detection
 - `Sources/OpenIslandCore/ClaudeTranscriptDiscovery.swift` — Discovers sessions from `~/.claude/projects/` JSONL files
 - `Sources/OpenIslandCore/ClaudeSessionRegistry.swift` — Persists/restores Claude sessions across app launches

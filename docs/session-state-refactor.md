@@ -158,7 +158,7 @@ After refactoring, AppleScript is used ONLY for jump precision (#2). This is ext
   5. Run jump target resolver for Ghostty/Terminal precision
 - Rewrite `computeSessionBuckets()` (~35 lines → ~10 lines): filter by `isVisibleInIsland`, sort by attention > running > updatedAt
 
-### Modify: `Sources/OpenIslandCore/DemoBridgeServer.swift`
+### Modify: `Sources/OpenIslandCore/BridgeServer.swift`
 - Minimal changes. SessionEnd handler can set `phase = .completed` as before. Hooks continue to create and update sessions as they do now.
 
 ## 7. Migration Phases

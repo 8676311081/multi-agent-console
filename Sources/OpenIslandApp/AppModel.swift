@@ -119,7 +119,7 @@ final class AppModel {
     private let overlayPanelController = OverlayPanelController()
 
     @ObservationIgnored
-    private let bridgeServer = DemoBridgeServer()
+    private let bridgeServer = BridgeServer()
 
     @ObservationIgnored
     private let bridgeClient = LocalBridgeClient()

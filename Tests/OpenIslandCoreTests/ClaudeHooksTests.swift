@@ -157,7 +157,7 @@ struct ClaudeHooksTests {
     @Test
     func claudePermissionRequestReturnsAllowDirectiveAfterApproval() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
-        let server = DemoBridgeServer(socketURL: socketURL)
+        let server = BridgeServer(socketURL: socketURL)
         try server.start()
         defer { server.stop() }
 
@@ -219,7 +219,7 @@ struct ClaudeHooksTests {
     @Test
     func claudeAskUserQuestionReturnsUpdatedAnswers() async throws {
         let socketURL = BridgeSocketLocation.uniqueTestURL()
-        let server = DemoBridgeServer(socketURL: socketURL)
+        let server = BridgeServer(socketURL: socketURL)
         try server.start()
         defer { server.stop() }
 
