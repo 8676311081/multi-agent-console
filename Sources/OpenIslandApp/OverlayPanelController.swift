@@ -18,10 +18,7 @@ final class OverlayPanelController {
     private static let openedContentVerticalInsets: CGFloat = 8
     private static let openedEmptyStateHeight: CGFloat = 108
     private static let approvalCardHeight: CGFloat = 288
-    private static let simpleQuestionCardHeight: CGFloat = 248
-    private static let structuredQuestionCardBaseHeight: CGFloat = 312
-    private static let structuredQuestionCardPerQuestionHeight: CGFloat = 82
-    private static let structuredQuestionCardMaximumHeight: CGFloat = 448
+    private static let questionCardHeight: CGFloat = 200
     // Completion card chrome breakdown (everything except the scrollable text):
     // openedContent vertical padding: 24, card container padding: 28,
     // card VStack spacing: 14, card header (title+prompt): ~50,
@@ -482,20 +479,7 @@ final class OverlayPanelController {
     }
 
     private func questionCardHeight(for prompt: QuestionPrompt?) -> CGFloat {
-        guard let prompt else {
-            return Self.simpleQuestionCardHeight
-        }
-
-        let structuredQuestionCount = prompt.questions.count
-        guard structuredQuestionCount > 0 else {
-            return Self.simpleQuestionCardHeight
-        }
-
-        let questionBlocksHeight = CGFloat(structuredQuestionCount) * Self.structuredQuestionCardPerQuestionHeight
-        return min(
-            Self.structuredQuestionCardMaximumHeight,
-            Self.structuredQuestionCardBaseHeight + questionBlocksHeight
-        )
+        Self.questionCardHeight
     }
 
     private func completionCardHeight(for model: AppModel) -> CGFloat {

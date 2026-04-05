@@ -238,12 +238,10 @@ def main() -> None:
         require_frame_between(
             overlay_frame,
             width=(660, 760),
-            height=(280, 340),
+            height=(200, 340),
             context="questionCard overlay frame",
         )
-        required = {"10 秒", "鼠标离开收起", "都要"}
-        if not required.issubset(button_labels):
-            fail(f"missing question options {sorted(required - button_labels)}")
+        assert_contains_any(button_labels, ["Go to Terminal"], "questionCard button labels")
 
     elif scenario == "completionCard":
         if notch_status != "opened":
