@@ -285,7 +285,7 @@ public struct SessionState: Equatable, Sendable {
                 session.processNotSeenCount = 0
             } else {
                 session.processNotSeenCount += 1
-                session.isProcessAlive = session.processNotSeenCount < 1
+                session.isProcessAlive = session.processNotSeenCount < 3
             }
 
             if session.isProcessAlive != wasAlive {
