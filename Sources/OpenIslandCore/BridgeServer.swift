@@ -1279,6 +1279,7 @@ public final class BridgeServer: @unchecked Sendable {
         if case let .sessionStarted(payload) = event {
             emittedSessionIDs.insert(payload.sessionID)
         }
+        stateSnapshot.apply(event)
         broadcast([.event(event)])
     }
 
