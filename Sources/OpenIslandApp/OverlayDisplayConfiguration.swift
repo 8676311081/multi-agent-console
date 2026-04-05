@@ -60,21 +60,13 @@ enum OverlayDisplayResolver {
     static let defaultPanelSize = NSSize(width: 708, height: 514)
 
     static func availableDisplayOptions() -> [OverlayDisplayOption] {
-        let automatic = OverlayDisplayOption(
-            id: OverlayDisplayOption.automaticID,
-            title: "Automatic",
-            subtitle: "Prefer the built-in notched display, otherwise use the current main display."
-        )
-
-        let displays = NSScreen.screens.map { screen in
+        NSScreen.screens.map { screen in
             OverlayDisplayOption(
                 id: screenID(for: screen),
                 title: screen.localizedName,
                 subtitle: "\(screenKindDescription(for: screen)) · \(Int(screen.frame.width))×\(Int(screen.frame.height))"
             )
         }
-
-        return [automatic] + displays
     }
 
     static func diagnostics(preferredScreenID: String?, panelSize: NSSize) -> OverlayPlacementDiagnostics? {
