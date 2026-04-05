@@ -23,6 +23,10 @@ This index is the repository map for humans and coding agents. Read these files 
 - [docs/claude-code-runtime-plan.md](./claude-code-runtime-plan.md) for the planned Claude adapter runtime shape
 - [docs/app-ghostty-codex-chain.md](./app-ghostty-codex-chain.md) for terminal environment findings across the current supported chain
 
+## Refactoring Plans
+
+- [docs/session-state-refactor.md](./session-state-refactor.md) for the session state management refactoring plan (process discovery as source of truth)
+
 ## Investigations
 
 - [docs/island-position-investigation.md](./island-position-investigation.md) for notch and external-display placement work
