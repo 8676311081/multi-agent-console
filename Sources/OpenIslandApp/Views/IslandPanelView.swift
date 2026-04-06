@@ -1109,7 +1109,7 @@ private struct IslandSessionRow: View {
             },
             alignment: .bottom
         )
-        .modifier(ConditionalDrawingGroup(enabled: useDrawingGroup))
+        .modifier(ConditionalDrawingGroup(enabled: useDrawingGroup && !isActionable))
         .contentShape(RoundedRectangle(cornerRadius: isActionable ? 24 : 22, style: .continuous))
         .onTapGesture(perform: handlePrimaryTap)
         .onHover { hovering in
@@ -1270,7 +1270,10 @@ private struct IslandSessionRow: View {
     }
 
     private var completionMessageText: String {
-        session.lastAssistantMessageText?.trimmedForNotificationCard ?? session.summary
+        if let text = session.lastAssistantMessageText?.trimmedForNotificationCard, !text.isEmpty {
+            return text
+        }
+        return session.summary
     }
 
     private var commandLabel: String {
