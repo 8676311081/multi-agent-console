@@ -38,6 +38,9 @@ cp "$setup_binary" "$bundle_dir/Contents/Helpers/OpenIslandSetup"
 cp "$brand_icon" "$bundle_dir/Contents/Resources/OpenIsland.icns"
 chmod +x "$bundle_binary" "$bundle_dir/Contents/Helpers/OpenIslandHooks" "$bundle_dir/Contents/Helpers/OpenIslandSetup"
 
+# Add rpath so the binary can find Sparkle.framework in Contents/Frameworks/.
+install_name_tool -add_rpath @loader_path/../Frameworks "$bundle_binary" 2>/dev/null || true
+
 # Copy SPM resource bundle so Bundle.module can find localized strings.
 resource_bundle="$build_root/OpenIsland_OpenIslandApp.bundle"
 if [ -d "$resource_bundle" ]; then
