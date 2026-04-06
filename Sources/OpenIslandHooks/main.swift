@@ -27,7 +27,11 @@ struct OpenIslandHooksCLI {
                     .decode(CodexHookPayload.self, from: input)
                     .withRuntimeContext(environment: ProcessInfo.processInfo.environment)
 
-                guard let response = try? client.send(.processCodexHook(payload)) else {
+                let timeout: TimeInterval = payload.hookEventName == .preToolUse
+                    ? interactiveClaudeHookTimeout
+                    : 45
+
+                guard let response = try? client.send(.processCodexHook(payload), timeout: timeout) else {
                     return
                 }
 
