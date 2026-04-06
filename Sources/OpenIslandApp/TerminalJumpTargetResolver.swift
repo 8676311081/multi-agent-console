@@ -74,8 +74,9 @@ struct TerminalJumpTargetResolver {
         if !weztermFamilySessions.isEmpty {
             for session in weztermFamilySessions {
                 let terminalName = normalizedTerminalName(for: session.jumpTarget?.terminalApp) ?? ""
-                let cli = terminalName == "kaku" ? "kaku" : "wezterm"
-                if let snapshots = fetchWeztermFamilySnapshots(cli: cli) {
+                let bundleID = terminalName == "kaku" ? "fun.tw93.kaku" : "com.github.wez.wezterm"
+                if let cliPath = resolveWeztermFamilyCLIPath(for: bundleID),
+                   let snapshots = fetchWeztermFamilySnapshots(cliPath: cliPath, bundleIdentifier: bundleID) {
                     let matched = matchWeztermFamilySnapshots(snapshots, to: [session])
                     for (sessionID, snapshot) in matched {
                         if let corrected = correctedWeztermFamilyJumpTarget(
@@ -281,9 +282,7 @@ struct TerminalJumpTargetResolver {
         // Pass 2: working directory match.
         for snapshot in snapshots where !assignments.values.contains(where: { $0.paneID == snapshot.paneID }) {
             let snapshotCWD = normalizedPathForMatching(
-                snapshot.workingDirectory.hasPrefix("file://")
-                    ? String(snapshot.workingDirectory.dropFirst(7))
-                    : snapshot.workingDirectory
+                Self.weztermFamilyNormalizeCWD(snapshot.workingDirectory)
             )
             if let session = sessions.first(where: {
                 assignments[$0.id] == nil
@@ -313,9 +312,7 @@ struct TerminalJumpTargetResolver {
         terminalName: String
     ) -> JumpTarget? {
         let displayName = terminalName == "kaku" ? "Kaku" : "WezTerm"
-        let cwd = snapshot.workingDirectory.hasPrefix("file://")
-            ? String(snapshot.workingDirectory.dropFirst(7))
-            : snapshot.workingDirectory
+        let cwd = Self.weztermFamilyNormalizeCWD(snapshot.workingDirectory)
         let hadExistingJumpTarget = session.jumpTarget != nil
         var jumpTarget = session.jumpTarget ?? JumpTarget(
             terminalApp: displayName,
@@ -363,15 +360,53 @@ struct TerminalJumpTargetResolver {
 
     // MARK: - WezTerm-family CLI fetching
 
-    private func fetchWeztermFamilySnapshots(cli: String) -> [WeztermFamilySnapshot]? {
-        let bundleID = cli == "kaku" ? "fun.tw93.kaku" : "com.github.wez.wezterm"
-        guard isRunning(bundleIdentifier: bundleID) else {
+    private func resolveWeztermFamilyCLIPath(for bundleIdentifier: String) -> String? {
+        let cliName: String
+        let appName: String
+        switch bundleIdentifier {
+        case "fun.tw93.kaku":
+            cliName = "kaku"
+            appName = "Kaku"
+        case "com.github.wez.wezterm":
+            cliName = "wezterm"
+            appName = "WezTerm"
+        default: return nil
+        }
+
+        let bundleCandidates = [
+            "/Applications/\(appName).app/Contents/MacOS/\(cliName)",
+            NSHomeDirectory() + "/Applications/\(appName).app/Contents/MacOS/\(cliName)",
+        ]
+        if let found = bundleCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return found
+        }
+
+        let whichTask = Process()
+        whichTask.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        whichTask.arguments = [cliName]
+        let pipe = Pipe()
+        whichTask.standardOutput = pipe
+        whichTask.standardError = FileHandle.nullDevice
+        if let _ = try? whichTask.run() {
+            whichTask.waitUntilExit()
+            if whichTask.terminationStatus == 0 {
+                let path = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !path.isEmpty { return path }
+            }
+        }
+
+        return nil
+    }
+
+    private func fetchWeztermFamilySnapshots(cliPath: String, bundleIdentifier: String) -> [WeztermFamilySnapshot]? {
+        guard isRunning(bundleIdentifier: bundleIdentifier) else {
             return []
         }
 
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = [cli, "cli", "list", "--format", "json"]
+        task.executableURL = URL(fileURLWithPath: cliPath)
+        task.arguments = ["cli", "list", "--format", "json"]
 
         let outputPipe = Pipe()
         task.standardOutput = outputPipe
@@ -520,6 +555,14 @@ struct TerminalJumpTargetResolver {
                     customTitle: values[1]
                 )
             }
+    }
+
+    /// Strip `file://` scheme and percent-encoding from a WezTerm/Kaku cwd URL.
+    private static func weztermFamilyNormalizeCWD(_ cwd: String) -> String {
+        if cwd.hasPrefix("file://"), let url = URL(string: cwd) {
+            return url.path
+        }
+        return cwd
     }
 
     // MARK: - Helpers
