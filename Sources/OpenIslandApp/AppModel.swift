@@ -729,6 +729,17 @@ final class AppModel {
             return state.session(id: payload.sessionID)?.phase == .completed
         }()
 
+        // Guard: don't let rollout events downgrade a session from completed
+        // back to running. The bridge's sessionCompleted is authoritative; the
+        // rollout watcher may have read the JSONL before task_complete was
+        // flushed, producing a stale activityUpdated(phase: .running).
+        if ingress == .rollout,
+           case let .activityUpdated(payload) = event,
+           payload.phase == .running,
+           state.session(id: payload.sessionID)?.phase == .completed {
+            return
+        }
+
         state.apply(event)
         reconcileIslandSurfaceAfterStateChange()
         if ingress == .bridge {
@@ -747,6 +758,7 @@ final class AppModel {
 
         if let surface = IslandSurface.notificationSurface(for: event),
            !wasAlreadyCompleted,
+           surface.sessionID.flatMap({ state.session(id: $0) }) != nil,
            (ingress == .bridge || !isResolvingInitialLiveSessions),
            notchStatus == .closed || notchOpenReason == .notification {
             presentNotificationSurface(surface)

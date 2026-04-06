@@ -260,8 +260,12 @@ final class OverlayUICoordinator {
     }
 
     var autoCollapseOnMouseLeaveRequiresPriorSurfaceEntry: Bool {
-        notchOpenReason == .notification
-            && islandSurface.autoDismissesWhenPresentedAsNotification(session: activeIslandCardSession)
+        guard notchOpenReason == .notification else { return false }
+        // If the session was removed from state (e.g. by process monitoring),
+        // default to requiring prior surface entry — prevents the notification
+        // from closing immediately on pointer exit before the user sees it.
+        guard let session = activeIslandCardSession else { return true }
+        return islandSurface.autoDismissesWhenPresentedAsNotification(session: session)
     }
 
     var showsNotificationCard: Bool {
@@ -346,7 +350,13 @@ final class OverlayUICoordinator {
         }
 
         notificationAutoCollapseTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(Self.notificationSurfaceAutoCollapseDelay))
+            do {
+                try await Task.sleep(for: .seconds(Self.notificationSurfaceAutoCollapseDelay))
+            } catch {
+                // Task was cancelled (e.g. a new event reset the timer).
+                // Do NOT proceed — the replacement task owns the new timer.
+                return
+            }
 
             guard let self,
                   self.notchStatus == .opened,

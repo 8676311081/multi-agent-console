@@ -655,6 +655,15 @@ public enum CodexRolloutReducer {
             return
         }
 
+        // After task_complete, trailing response_item entries (function_call
+        // results still being flushed) should not reset the completion state.
+        guard !snapshot.isCompleted else {
+            if let timestamp {
+                snapshot.updatedAt = timestamp
+            }
+            return
+        }
+
         snapshot.currentTool = toolName
         snapshot.currentCommandPreview = commandPreview(for: toolName, payload: payload)
         snapshot.phase = .running
@@ -692,12 +701,18 @@ public enum CodexRolloutReducer {
         to snapshot: inout CodexRolloutSnapshot
     ) {
         snapshot.lastAssistantMessage = message
-        snapshot.currentTool = nil
-        snapshot.currentCommandPreview = nil
         snapshot.summary = message
-        snapshot.phase = .running
-        snapshot.isCompleted = false
-        snapshot.isInterrupted = false
+
+        // After task_complete, the JSONL may still contain trailing
+        // response_item entries (the final assistant message). These should
+        // update content but NOT reset the completion state — only a new
+        // user prompt (applyUserMessage) starts a fresh turn.
+        if !snapshot.isCompleted {
+            snapshot.currentTool = nil
+            snapshot.currentCommandPreview = nil
+            snapshot.phase = .running
+            snapshot.isInterrupted = false
+        }
 
         if let timestamp {
             snapshot.updatedAt = timestamp
