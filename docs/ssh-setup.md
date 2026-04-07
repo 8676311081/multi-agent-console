@@ -95,6 +95,16 @@ ssh -R /tmp/open-island-$(id -u).sock:/tmp/open-island-$(id -u).sock user@myserv
 2. SSH to the remote with socket forwarding enabled
 3. Run Claude Code on the remote — sessions should appear in the Open Island overlay
 
+## Important: sshd configuration
+
+The remote server's sshd must allow cleaning up stale socket files on reconnect. Ask the server admin to add this to `/etc/ssh/sshd_config`:
+
+```
+StreamLocalBindUnlink yes
+```
+
+Without this, reconnecting after a dropped SSH session will fail with "Address already in use" because the old socket file is still on disk.
+
 ## Troubleshooting
 
 **Sessions not appearing?**

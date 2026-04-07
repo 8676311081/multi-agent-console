@@ -54,21 +54,34 @@ def infer_terminal_app(env):
 
 
 def current_tty():
+    # Try /proc (Linux) first — no subprocess needed.
     try:
-        result = subprocess.run(
-            ["/usr/bin/tty"], capture_output=True, text=True, timeout=2,
-        )
-        tty = result.stdout.strip()
-        if tty and "not a tty" not in tty:
+        tty = os.ttyname(0)
+        if tty:
             return tty
-    except Exception:
+    except (OSError, AttributeError):
         pass
 
-    # Fallback: read parent process TTY via ps
+    # Fallback: call tty(1) via PATH (works on macOS and most Linux distros).
+    import shutil
+    tty_bin = shutil.which("tty")
+    if tty_bin:
+        try:
+            result = subprocess.run(
+                [tty_bin], capture_output=True, text=True, timeout=2,
+            )
+            tty = result.stdout.strip()
+            if tty and "not a tty" not in tty:
+                return tty
+        except Exception:
+            pass
+
+    # Last resort: read parent process TTY via ps.
+    ps_bin = shutil.which("ps") or "/bin/ps"
     try:
         ppid = os.getppid()
         result = subprocess.run(
-            ["/bin/ps", "-p", str(ppid), "-o", "tty="],
+            [ps_bin, "-p", str(ppid), "-o", "tty="],
             capture_output=True, text=True, timeout=2,
         )
         tty = result.stdout.strip()

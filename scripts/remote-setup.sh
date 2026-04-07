@@ -119,7 +119,19 @@ if os.path.exists(settings_path):
         existing = json.load(f)
 
 new_hooks = json.loads(sys.stdin.read())
-existing['hooks'] = new_hooks['hooks']
+
+# Merge per-event instead of replacing the entire hooks dict, so
+# user's custom hooks for other events are preserved.
+if 'hooks' not in existing:
+    existing['hooks'] = {}
+for event, entries in new_hooks['hooks'].items():
+    cur = existing['hooks'].get(event, [])
+    # Avoid duplicating the same command
+    existing_cmds = {e.get('command') for e in cur if isinstance(e, dict)}
+    for entry in entries:
+        if entry.get('command') not in existing_cmds:
+            cur.append(entry)
+    existing['hooks'][event] = cur
 
 with open(settings_path, 'w') as f:
     json.dump(existing, f, indent=2)
@@ -130,6 +142,10 @@ print('Updated ' + settings_path)
 
 echo ""
 echo "==> Done!"
+echo ""
+echo "IMPORTANT: Ensure the remote sshd has 'StreamLocalBindUnlink yes' in"
+echo "/etc/ssh/sshd_config — otherwise reconnecting will fail with"
+echo "'Address already in use' when the old socket file is still on disk."
 echo ""
 echo "Add the following to your ~/.ssh/config to enable socket forwarding:"
 echo ""
