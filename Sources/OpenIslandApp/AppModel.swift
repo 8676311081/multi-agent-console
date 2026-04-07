@@ -322,8 +322,35 @@ final class AppModel {
     private func startWatchRelay() {
         guard watchRelay == nil else { return }
         let relay = WatchNotificationRelay()
+        setupWatchRelayCallbacks(relay)
         relay.start()
         self.watchRelay = relay
+    }
+
+    /// Wire up resolution callbacks so Watch/iPhone actions flow back to the bridge.
+    private func setupWatchRelayCallbacks(_ relay: WatchNotificationRelay) {
+        relay.onResolvePermission = { [weak self] sessionID, approved in
+            Task { @MainActor [weak self] in
+                self?.approvePermission(for: sessionID, approved: approved)
+            }
+        }
+
+        relay.onAnswerQuestion = { [weak self] sessionID, answer in
+            Task { @MainActor [weak self] in
+                self?.answerQuestion(
+                    for: sessionID,
+                    answer: QuestionPromptResponse(answer: answer)
+                )
+            }
+        }
+
+        relay.endpoint.activeSessionCountProvider = { [weak self] in
+            // Safe to call from any queue — reads a snapshot count.
+            guard let self else { return 0 }
+            return MainActor.assumeIsolated {
+                self.state.sessions.count
+            }
+        }
     }
 
     private func stopWatchRelay() {
@@ -1031,6 +1058,26 @@ final class AppModel {
         discovery.scheduleCodexSessionPersistence()
         discovery.scheduleClaudeSessionPersistence()
         discovery.scheduleCursorSessionPersistence()
+
+        // Push relevant events to the Watch/iPhone via the relay
+        if let relay = watchRelay {
+            let eventSessionID: String? = {
+                switch event {
+                case let .sessionStarted(p): return p.sessionID
+                case let .activityUpdated(p): return p.sessionID
+                case let .permissionRequested(p): return p.sessionID
+                case let .questionAsked(p): return p.sessionID
+                case let .sessionCompleted(p): return p.sessionID
+                case let .jumpTargetUpdated(p): return p.sessionID
+                case let .sessionMetadataUpdated(p): return p.sessionID
+                case let .claudeSessionMetadataUpdated(p): return p.sessionID
+                case let .openCodeSessionMetadataUpdated(p): return p.sessionID
+                case let .actionableStateResolved(p): return p.sessionID
+                }
+            }()
+            let session = eventSessionID.flatMap { state.session(id: $0) }
+            relay.notifyEvent(event, session: session)
+        }
 
         if updateLastActionMessage {
             lastActionMessage = describe(event)
