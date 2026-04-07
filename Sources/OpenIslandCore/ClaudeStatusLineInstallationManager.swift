@@ -115,9 +115,9 @@ public final class ClaudeStatusLineInstallationManager: @unchecked Sendable {
     }
 
     @discardableResult
-    public func install() throws -> ClaudeStatusLineInstallationStatus {
+    public func install(replacingExisting: Bool = false) throws -> ClaudeStatusLineInstallationStatus {
         let currentStatus = try status()
-        if currentStatus.hasConflictingStatusLine {
+        if currentStatus.hasConflictingStatusLine && !replacingExisting {
             throw ClaudeStatusLineInstallationError.existingStatusLineConflict(
                 command: currentStatus.statusLineCommand
             )

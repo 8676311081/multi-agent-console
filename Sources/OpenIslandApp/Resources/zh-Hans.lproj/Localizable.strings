@@ -63,6 +63,11 @@
 "setup.usageBridge" = "Claude 用量桥接";
 "setup.usageBridgeReady" = "已安装";
 "setup.usageBridgeDesc" = "在本地追踪 Claude API 用量";
+"setup.usageBridgeConflict" = "已检测到其他状态行配置，替换后可启用用量追踪。";
+"setup.usageBridgeReplace" = "替换";
+"setup.usageBridgeReplaceTitle" = "替换现有状态行？";
+"setup.usageBridgeReplaceAction" = "替换";
+"setup.usageBridgeReplaceMessage" = "将替换 Claude Code 现有的状态行命令为 Open Island 用量桥接。操作前会备份当前设置。";
 "setup.optional" = "可选";
 "setup.permissionsTitle" = "辅助功能";
 "setup.permissionsDesc" = "Open Island 可能需要辅助功能权限来检测终端窗口。请在「系统设置 → 隐私与安全性 → 辅助功能」中授权。";

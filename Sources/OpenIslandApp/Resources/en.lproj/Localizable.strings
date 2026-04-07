@@ -63,6 +63,11 @@
 "setup.usageBridge" = "Claude Usage Bridge";
 "setup.usageBridgeReady" = "Installed";
 "setup.usageBridgeDesc" = "Tracks Claude API usage locally";
+"setup.usageBridgeConflict" = "Another status line is already configured. Replace it to enable usage tracking.";
+"setup.usageBridgeReplace" = "Replace";
+"setup.usageBridgeReplaceTitle" = "Replace Existing Status Line?";
+"setup.usageBridgeReplaceAction" = "Replace";
+"setup.usageBridgeReplaceMessage" = "This will replace the existing Claude Code status line command with the Open Island usage bridge. A backup of your settings will be created.";
 "setup.optional" = "Optional";
 "setup.permissionsTitle" = "Accessibility";
 "setup.permissionsDesc" = "Open Island may need Accessibility permission to detect terminal windows. Grant it in System Settings → Privacy & Security → Accessibility.";

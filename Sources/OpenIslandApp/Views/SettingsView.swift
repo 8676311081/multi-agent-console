@@ -323,6 +323,7 @@ struct SetupSettingsPane: View {
     @State private var confirmingUninstallClaude = false
     @State private var confirmingUninstallCodex = false
     @State private var confirmingUninstallOpenCode = false
+    @State private var confirmingReplaceUsageBridge = false
 
     private var lang: LanguageManager { model.lang }
 
@@ -392,11 +393,20 @@ struct SetupSettingsPane: View {
                         }
                     } else if model.isClaudeUsageSetupBusy {
                         ProgressView().controlSize(.small)
+                    } else if model.hasConflictingClaudeStatusLine {
+                        Button(lang.t("setup.usageBridgeReplace")) {
+                            confirmingReplaceUsageBridge = true
+                        }
                     } else {
                         Button(lang.t("settings.general.install")) {
                             model.installClaudeUsageBridge()
                         }
                     }
+                }
+                if model.hasConflictingClaudeStatusLine {
+                    Text(lang.t("setup.usageBridgeConflict"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             } header: {
                 HStack(spacing: 4) {
@@ -404,6 +414,14 @@ struct SetupSettingsPane: View {
                     Text(lang.t("setup.optional"))
                         .foregroundStyle(.tertiary)
                 }
+            }
+            .alert(lang.t("setup.usageBridgeReplaceTitle"), isPresented: $confirmingReplaceUsageBridge) {
+                Button(lang.t("setup.usageBridgeReplaceAction"), role: .destructive) {
+                    model.replaceClaudeUsageBridge()
+                }
+                Button(lang.t("settings.general.cancel"), role: .cancel) {}
+            } message: {
+                Text(lang.t("setup.usageBridgeReplaceMessage"))
             }
 
             Section(lang.t("setup.section.permissions")) {

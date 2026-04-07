@@ -63,6 +63,8 @@ final class AppModel {
     var claudeHooksInstalled: Bool { hooks.claudeHooksInstalled }
     var openCodePluginInstalled: Bool { hooks.openCodePluginInstalled }
     var claudeUsageInstalled: Bool { hooks.claudeUsageInstalled }
+    var hasConflictingClaudeStatusLine: Bool { hooks.hasConflictingClaudeStatusLine }
+    var conflictingClaudeStatusLineCommand: String? { hooks.conflictingClaudeStatusLineCommand }
     var claudeHookStatusTitle: String { hooks.claudeHookStatusTitle }
     var claudeHookStatusSummary: String { hooks.claudeHookStatusSummary }
     var claudeUsageStatusTitle: String { hooks.claudeUsageStatusTitle }
@@ -89,6 +91,7 @@ final class AppModel {
     func installOpenCodePlugin() { hooks.installOpenCodePlugin() }
     func uninstallOpenCodePlugin() { hooks.uninstallOpenCodePlugin() }
     func installClaudeUsageBridge() { hooks.installClaudeUsageBridge() }
+    func replaceClaudeUsageBridge() { hooks.replaceClaudeUsageBridge() }
     func uninstallClaudeUsageBridge() { hooks.uninstallClaudeUsageBridge() }
     var isBridgeReady = false
     var lastActionMessage = "Waiting for agent hook events..." {
