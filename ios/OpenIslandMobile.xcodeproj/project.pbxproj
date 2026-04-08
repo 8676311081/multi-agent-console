@@ -19,7 +19,37 @@
 		AA000011 /* EventDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000011 /* EventDetailView.swift */; };
 		AA000012 /* WatchMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000012 /* WatchMessage.swift */; };
 		AA000013 /* WatchConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000013 /* WatchConnectivityManager.swift */; };
+		WB000001 /* OpenIslandWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = WA000001 /* OpenIslandWatchApp.swift */; };
+		WB000002 /* WatchSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = WA000002 /* WatchSessionManager.swift */; };
+		WB000003 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = WA000003 /* HapticManager.swift */; };
+		WB000004 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = WA000004 /* ContentView.swift */; };
+		WB000005 /* WatchMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000012 /* WatchMessage.swift */; };
+		WB000006 /* OpenIslandWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = WC000001 /* OpenIslandWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		WP000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B2000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = WF000001;
+			remoteInfo = OpenIslandWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		WE000002 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				WB000006 /* OpenIslandWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		AB000001 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
@@ -36,10 +66,22 @@
 		AB000012 /* WatchMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMessage.swift; sourceTree = "<group>"; };
 		AB000013 /* WatchConnectivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchConnectivityManager.swift; sourceTree = "<group>"; };
 		AC000001 /* OpenIslandMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenIslandMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		WA000001 /* OpenIslandWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenIslandWatchApp.swift; sourceTree = "<group>"; };
+		WA000002 /* WatchSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSessionManager.swift; sourceTree = "<group>"; };
+		WA000003 /* HapticManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticManager.swift; sourceTree = "<group>"; };
+		WA000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		WC000001 /* OpenIslandWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenIslandWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		AD000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		WD000002 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -54,6 +96,7 @@
 			children = (
 				AE000008 /* Shared */,
 				AE000002 /* OpenIslandMobile */,
+				WE000001 /* OpenIslandWatch */,
 				AE000006 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -121,8 +164,20 @@
 			isa = PBXGroup;
 			children = (
 				AC000001 /* OpenIslandMobile.app */,
+				WC000001 /* OpenIslandWatch.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		WE000001 /* OpenIslandWatch */ = {
+			isa = PBXGroup;
+			children = (
+				WA000001 /* OpenIslandWatchApp.swift */,
+				WA000002 /* WatchSessionManager.swift */,
+				WA000003 /* HapticManager.swift */,
+				WA000004 /* ContentView.swift */,
+			);
+			path = OpenIslandWatch;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -135,14 +190,33 @@
 				B0000001 /* Sources */,
 				AD000001 /* Frameworks */,
 				B0000002 /* Resources */,
+				WE000002 /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				WT000001 /* PBXTargetDependency */,
+			);
+			name = OpenIslandMobile;
+			productName = OpenIslandMobile;
+			productReference = AC000001 /* OpenIslandMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+		WF000001 /* OpenIslandWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = W1000001 /* Build configuration list for PBXNativeTarget "OpenIslandWatch" */;
+			buildPhases = (
+				WD000001 /* Sources */,
+				WD000002 /* Frameworks */,
+				WD000003 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = OpenIslandMobile;
-			productName = OpenIslandMobile;
-			productReference = AC000001 /* OpenIslandMobile.app */;
+			name = OpenIslandWatch;
+			productName = OpenIslandWatch;
+			productReference = WC000001 /* OpenIslandWatch.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -156,6 +230,9 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					AF000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					WF000001 = {
 						CreatedOnToolsVersion = 16.0;
 					};
 				};
@@ -174,12 +251,20 @@
 			projectRoot = "";
 			targets = (
 				AF000001 /* OpenIslandMobile */,
+				WF000001 /* OpenIslandWatch */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		B0000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		WD000003 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -208,7 +293,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		WD000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				WB000001 /* OpenIslandWatchApp.swift in Sources */,
+				WB000002 /* WatchSessionManager.swift in Sources */,
+				WB000003 /* HapticManager.swift in Sources */,
+				WB000004 /* ContentView.swift in Sources */,
+				WB000005 /* WatchMessage.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		WT000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = WF000001 /* OpenIslandWatch */;
+			targetProxy = WP000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		B3000001 /* Debug */ = {
@@ -386,6 +491,62 @@
 			};
 			name = Release;
 		};
+		W3000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Open Island";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = app.openisland.mobile;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.openisland.mobile.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		W3000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Open Island";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = app.openisland.mobile;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.openisland.mobile.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -403,6 +564,15 @@
 			buildConfigurations = (
 				B3000001 /* Debug */,
 				B3000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		W1000001 /* Build configuration list for PBXNativeTarget "OpenIslandWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				W3000001 /* Debug */,
+				W3000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
