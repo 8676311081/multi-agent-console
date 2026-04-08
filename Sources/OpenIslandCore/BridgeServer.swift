@@ -840,7 +840,8 @@ public final class BridgeServer: @unchecked Sendable {
                         sessionID: payload.sessionID,
                         summary: "Claude session ended.",
                         timestamp: .now,
-                        isInterrupt: true
+                        isInterrupt: true,
+                        isSessionEnd: true
                     )
                 )
             )
@@ -1000,7 +1001,8 @@ public final class BridgeServer: @unchecked Sendable {
                         sessionID: payload.sessionID,
                         summary: "OpenCode session ended.",
                         timestamp: .now,
-                        isInterrupt: true
+                        isInterrupt: true,
+                        isSessionEnd: true
                     )
                 )
             )

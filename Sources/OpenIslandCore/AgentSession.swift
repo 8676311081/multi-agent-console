@@ -277,8 +277,17 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
     /// Whether this session originates from a remote (SSH) connection.
     public var isRemote: Bool = false
 
+    /// Whether this session's lifecycle is driven by hook events rather than
+    /// process polling. When `true`, visibility is determined by hook signals
+    /// (`SessionStart` / `SessionEnd`) instead of `ps`/`lsof` process discovery.
+    public var isHookManaged: Bool = false
+
+    /// Whether the agent session has ended (received `SessionEnd` hook).
+    /// Only meaningful for hook-managed sessions.
+    public var isSessionEnded: Bool = false
+
     /// Whether the agent process is currently alive according to process discovery.
-    /// Populated in parallel with the existing attachment system during Phase 1.
+    /// Used for non-hook-managed sessions (e.g. Codex, synthetic Claude sessions).
     public var isProcessAlive: Bool = false
 
     /// Number of consecutive reconciliation polls where the process was not found.
@@ -389,11 +398,13 @@ public extension AgentSession {
         attachmentState.isLive
     }
 
-    /// New visibility rule based on process liveness (Phase 1: parallel, not yet driving UI).
-    /// Will replace `isAttachedToTerminal` in Phase 3.
+    /// Visibility rule for the island UI.
+    /// Hook-managed sessions (Claude Code via hooks) rely on hook lifecycle
+    /// signals; non-hook sessions use process polling.
     var isVisibleInIsland: Bool {
         if isDemoSession { return true }
         if phase.requiresAttention { return true }
+        if isHookManaged { return !isSessionEnded }
         if isProcessAlive { return true }
         return false
     }

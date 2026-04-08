@@ -71,6 +71,8 @@ public struct SessionState: Equatable, Sendable {
                 openCodeMetadata: payload.openCodeMetadata?.isEmpty == true ? nil : payload.openCodeMetadata
             )
             session.isRemote = payload.isRemote
+            session.isHookManaged = payload.origin == .live
+            session.isSessionEnded = false
             session.isProcessAlive = true
             session.processNotSeenCount = 0
             upsert(session)
@@ -136,6 +138,9 @@ public struct SessionState: Equatable, Sendable {
             session.permissionRequest = nil
             session.questionPrompt = nil
             session.updatedAt = payload.timestamp
+            if payload.isSessionEnd == true {
+                session.isSessionEnded = true
+            }
             upsert(session)
 
         case let .jumpTargetUpdated(payload):
@@ -305,6 +310,12 @@ public struct SessionState: Equatable, Sendable {
                 continue
             }
 
+            // Hook-managed sessions rely on hook lifecycle signals (SessionStart/
+            // SessionEnd) rather than process polling, so skip them here.
+            if session.isHookManaged {
+                continue
+            }
+
             let wasAlive = session.isProcessAlive
 
             if aliveSessionIDs.contains(id) {
@@ -312,7 +323,7 @@ public struct SessionState: Equatable, Sendable {
                 session.processNotSeenCount = 0
             } else {
                 session.processNotSeenCount += 1
-                session.isProcessAlive = session.processNotSeenCount < 1
+                session.isProcessAlive = session.processNotSeenCount < 2
             }
 
             if session.isProcessAlive != wasAlive {
