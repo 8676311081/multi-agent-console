@@ -8,6 +8,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case setup
     case display
     case sound
+    case autoResponse
     case shortcuts
     case lab
     case about
@@ -19,8 +20,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general:   lang.t("settings.tab.general")
         case .setup:     lang.t("settings.tab.setup")
         case .display:   lang.t("settings.tab.display")
-        case .sound:     lang.t("settings.tab.sound")
-        case .shortcuts: lang.t("settings.tab.shortcuts")
+        case .sound:         lang.t("settings.tab.sound")
+        case .autoResponse:  lang.t("settings.tab.autoResponse")
+        case .shortcuts:     lang.t("settings.tab.shortcuts")
         case .lab:       lang.t("settings.tab.lab")
         case .about:     lang.t("settings.tab.about")
         }
@@ -31,8 +33,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general:   "gearshape.fill"
         case .setup:     "arrow.down.circle.fill"
         case .display:   "textformat.size"
-        case .sound:     "speaker.wave.2.fill"
-        case .shortcuts: "keyboard.fill"
+        case .sound:        "speaker.wave.2.fill"
+        case .autoResponse: "bolt.fill"
+        case .shortcuts:    "keyboard.fill"
         case .lab:       "flask.fill"
         case .about:     "info.circle.fill"
         }
@@ -43,8 +46,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general:   .gray
         case .setup:     .orange
         case .display:   .blue
-        case .sound:     .green
-        case .shortcuts: .gray
+        case .sound:        .green
+        case .autoResponse: .yellow
+        case .shortcuts:    .gray
         case .lab:       .pink
         case .about:     .blue
         }
@@ -52,7 +56,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var section: SettingsSection {
         switch self {
-        case .general, .setup, .display, .sound: .system
+        case .general, .setup, .display, .sound, .autoResponse: .system
         case .shortcuts, .lab:                   .advanced
         case .about:                             .app
         }
@@ -133,6 +137,8 @@ struct SettingsView: View {
                 DisplaySettingsPane(model: model)
             case .sound:
                 SoundSettingsPane(model: model)
+            case .autoResponse:
+                AutoResponseSettingsPane(model: model)
             case .shortcuts:
                 PlaceholderSettingsPane(model: model, titleKey: "settings.tab.shortcuts", subtitleKey: "settings.shortcuts.comingSoon")
             case .lab:
