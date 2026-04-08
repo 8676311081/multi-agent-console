@@ -84,6 +84,8 @@ final class AppModel {
     var isOpenCodeSetupBusy: Bool { hooks.isOpenCodeSetupBusy }
     var openCodePluginStatusTitle: String { hooks.openCodePluginStatusTitle }
     var openCodePluginStatusSummary: String { hooks.openCodePluginStatusSummary }
+    var claudeHealthReport: HookHealthReport? { hooks.claudeHealthReport }
+    var codexHealthReport: HookHealthReport? { hooks.codexHealthReport }
     var codexHookStatusTitle: String { hooks.codexHookStatusTitle }
     var codexHookStatusSummary: String { hooks.codexHookStatusSummary }
     func refreshCodexHookStatus() { hooks.refreshCodexHookStatus() }
@@ -106,6 +108,12 @@ final class AppModel {
     func uninstallOpenCodePlugin() { hooks.uninstallOpenCodePlugin() }
     func installClaudeUsageBridge() { hooks.installClaudeUsageBridge() }
     func uninstallClaudeUsageBridge() { hooks.uninstallClaudeUsageBridge() }
+    func runHealthChecks() { hooks.runHealthChecks() }
+    func repairHooks() {
+        Task { @MainActor in
+            await hooks.repairHooksIfNeeded()
+        }
+    }
     var isBridgeReady = false
     var lastActionMessage = "Waiting for agent hook events..." {
         didSet {
@@ -886,11 +894,14 @@ final class AppModel {
         hooks.hooksBinaryURL = payload.hooksBinaryURL
         hooks.updateHooksBinaryIfNeeded()
 
-        // Auto-install missing hooks and usage bridge on first launch.
+        // Auto-install missing hooks and usage bridge, then run health checks.
         if payload.hooksBinaryURL != nil {
             Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(800))
                 guard let self else { return }
+
+                // Wait for all status reads to complete before checking install state.
+                await self.hooks.refreshAllHookStatusAndWait()
+
                 if !self.claudeHooksInstalled { self.installClaudeHooks() }
                 if !self.codexHooksInstalled { self.installCodexHooks() }
                 if !self.qoderHooksInstalled { self.installQoderHooks() }
@@ -898,6 +909,10 @@ final class AppModel {
                 if !self.codebuddyHooksInstalled { self.installCodebuddyHooks() }
                 if !self.openCodePluginInstalled { self.installOpenCodePlugin() }
                 if !self.claudeUsageInstalled { self.installClaudeUsageBridge() }
+
+                // Run health checks after install to detect stale paths, conflicts, etc.
+                try? await Task.sleep(for: .milliseconds(500))
+                await self.hooks.repairHooksIfNeeded()
             }
         }
 

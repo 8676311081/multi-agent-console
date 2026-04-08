@@ -309,6 +309,87 @@ final class HookInstallationCoordinator {
         }
     }
 
+    // MARK: - Health check & auto-repair
+
+    var claudeHealthReport: HookHealthReport?
+    var codexHealthReport: HookHealthReport?
+
+    /// Runs health checks for both Claude and Codex hooks.
+    func runHealthChecks() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            let binaryURL = self.hooksBinaryURL
+            let (claudeReport, codexReport) = await Task.detached(priority: .utility) {
+                let claude = HookHealthCheck.checkClaude(hooksBinaryURL: binaryURL)
+                let codex = HookHealthCheck.checkCodex(hooksBinaryURL: binaryURL)
+                return (claude, codex)
+            }.value
+
+            self.claudeHealthReport = claudeReport
+            self.codexHealthReport = codexReport
+
+            if !claudeReport.isHealthy || !codexReport.isHealthy {
+                let claudeIssueCount = claudeReport.issues.count
+                let codexIssueCount = codexReport.issues.count
+                self.onStatusMessage?("Hook health check: \(claudeIssueCount) Claude issue(s), \(codexIssueCount) Codex issue(s).")
+            }
+        }
+    }
+
+    /// Attempts to auto-repair repairable issues by re-installing hooks.
+    /// Returns true if any repairs were attempted.
+    @discardableResult
+    func repairHooksIfNeeded() async -> Bool {
+        var repaired = false
+
+        // Re-run health checks first
+        let binaryURL = hooksBinaryURL
+        let (claudeReport, codexReport) = await Task.detached(priority: .utility) {
+            let claude = HookHealthCheck.checkClaude(hooksBinaryURL: binaryURL)
+            let codex = HookHealthCheck.checkCodex(hooksBinaryURL: binaryURL)
+            return (claude, codex)
+        }.value
+
+        claudeHealthReport = claudeReport
+        codexHealthReport = codexReport
+
+        // Repair Claude hooks if there are repairable issues
+        if !claudeReport.repairableIssues.isEmpty, hooksBinaryURL != nil {
+            onStatusMessage?("Repairing Claude hooks: \(claudeReport.repairableIssues.map(\.description).joined(separator: "; "))")
+            installClaudeHooks()
+            repaired = true
+        }
+
+        // Repair Codex hooks if there are repairable issues
+        if !codexReport.repairableIssues.isEmpty, hooksBinaryURL != nil {
+            onStatusMessage?("Repairing Codex hooks: \(codexReport.repairableIssues.map(\.description).joined(separator: "; "))")
+            installCodexHooks()
+            repaired = true
+        }
+
+        // Refresh health reports after repair
+        if repaired {
+            try? await Task.sleep(for: .milliseconds(500))
+            let (updatedClaude, updatedCodex) = await Task.detached(priority: .utility) {
+                let claude = HookHealthCheck.checkClaude(hooksBinaryURL: binaryURL)
+                let codex = HookHealthCheck.checkCodex(hooksBinaryURL: binaryURL)
+                return (claude, codex)
+            }.value
+            claudeHealthReport = updatedClaude
+            codexHealthReport = updatedCodex
+
+            if updatedClaude.isHealthy && updatedCodex.isHealthy {
+                onStatusMessage?("Hook repair completed successfully.")
+            } else {
+                let remaining = updatedClaude.manualIssues.count + updatedCodex.manualIssues.count
+                onStatusMessage?("Hook repair completed with \(remaining) remaining issue(s) that need manual attention.")
+            }
+        }
+
+        return repaired
+    }
+
     // MARK: - Refresh
 
     func refreshCodexHookStatus() {
@@ -356,6 +437,69 @@ final class HookInstallationCoordinator {
                 apply(status)
             } catch {
                 self.onStatusMessage?("Failed to read \(name) hook status: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Awaitable versions of refresh for use in startup flow to avoid race conditions.
+    func refreshAllHookStatusAndWait() async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let status = try self.claudeHookInstallationManager.status(hooksBinaryURL: self.hooksBinaryURL)
+                    self.claudeHookStatus = status
+                } catch {
+                    self.onStatusMessage?("Failed to read Claude hook status: \(error.localizedDescription)")
+                }
+            }
+
+            group.addTask { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let status = try self.codexHookInstallationManager.status(hooksBinaryURL: self.hooksBinaryURL)
+                    self.codexHookStatus = status
+                } catch {
+                    self.onStatusMessage?("Failed to read Codex hook status: \(error.localizedDescription)")
+                }
+            }
+
+            group.addTask { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let status = try self.openCodePluginInstallationManager.status()
+                    self.openCodePluginStatus = status
+                } catch {
+                    self.onStatusMessage?("Failed to read OpenCode plugin status: \(error.localizedDescription)")
+                }
+            }
+
+            group.addTask { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let usageState = try self.readClaudeUsageState(repairManagedBridgeIfNeeded: true)
+                    self.claudeStatusLineStatus = usageState.status
+                    self.claudeUsageSnapshot = usageState.snapshot
+                } catch {
+                    self.onStatusMessage?("Failed to read Claude usage state: \(error.localizedDescription)")
+                }
+            }
+
+            // CC fork agents
+            group.addTask { @MainActor [weak self] in
+                guard let self else { return }
+                for (manager, name, apply) in [
+                    (self.qoderHookInstallationManager, "Qoder", { [weak self] (s: ClaudeHookInstallationStatus) in self?.qoderHookStatus = s }),
+                    (self.factoryHookInstallationManager, "Factory", { [weak self] (s: ClaudeHookInstallationStatus) in self?.factoryHookStatus = s }),
+                    (self.codebuddyHookInstallationManager, "CodeBuddy", { [weak self] (s: ClaudeHookInstallationStatus) in self?.codebuddyHookStatus = s }),
+                ] {
+                    do {
+                        let status = try manager.status(hooksBinaryURL: self.hooksBinaryURL)
+                        apply(status)
+                    } catch {
+                        self.onStatusMessage?("Failed to read \(name) hook status: \(error.localizedDescription)")
+                    }
+                }
             }
         }
     }

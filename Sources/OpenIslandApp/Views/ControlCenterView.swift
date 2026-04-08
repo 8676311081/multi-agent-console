@@ -65,22 +65,45 @@ struct ControlCenterView: View {
                             metadataRow(title: "notice", value: "claude-island hooks still present")
                         }
                     }
+                    if let report = model.claudeHealthReport, !report.isHealthy {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(report.issues.enumerated()), id: \.offset) { _, issue in
+                                HStack(alignment: .top, spacing: 4) {
+                                    Image(systemName: issue.isAutoRepairable ? "wrench.fill" : "exclamationmark.triangle.fill")
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(issue.isAutoRepairable ? .orange : .red)
+                                    Text(issue.description)
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.6))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
                 } actions: {
                     HStack(spacing: 10) {
                         Button(lang.t("debug.refresh")) {
                             model.refreshClaudeHookStatus()
+                            model.runHealthChecks()
                         }
                         .buttonStyle(DebugActionButtonStyle(kind: .secondary))
 
-                        Button(model.claudeHooksInstalled ? lang.t("debug.removeHooks") : lang.t("debug.installHooks")) {
-                            if model.claudeHooksInstalled {
-                                model.uninstallClaudeHooks()
-                            } else {
-                                model.installClaudeHooks()
+                        if let report = model.claudeHealthReport, !report.repairableIssues.isEmpty {
+                            Button("Repair") {
+                                model.repairHooks()
                             }
+                            .buttonStyle(DebugActionButtonStyle(kind: .primary))
+                        } else {
+                            Button(model.claudeHooksInstalled ? lang.t("debug.removeHooks") : lang.t("debug.installHooks")) {
+                                if model.claudeHooksInstalled {
+                                    model.uninstallClaudeHooks()
+                                } else {
+                                    model.installClaudeHooks()
+                                }
+                            }
+                            .buttonStyle(DebugActionButtonStyle(kind: .primary))
+                            .disabled(model.isClaudeHookSetupBusy || model.hooksBinaryURL == nil)
                         }
-                        .buttonStyle(DebugActionButtonStyle(kind: .primary))
-                        .disabled(model.isClaudeHookSetupBusy || model.hooksBinaryURL == nil)
                     }
                 }
 

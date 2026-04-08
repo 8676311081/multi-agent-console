@@ -424,6 +424,8 @@ struct SetupSettingsPane: View {
 
             RemoteConnectionSection(model: model)
 
+            hookDiagnosticsSection
+
             Section {
                 Button(lang.t("setup.installAll")) {
                     if !model.claudeHooksInstalled { model.installClaudeHooks() }
@@ -441,6 +443,104 @@ struct SetupSettingsPane: View {
 
     private var allReady: Bool {
         model.claudeHooksInstalled && model.codexHooksInstalled && model.openCodePluginInstalled && model.claudeUsageInstalled
+    }
+
+    private var hasAnyIssues: Bool {
+        let claudeIssues = model.claudeHealthReport?.issues.count ?? 0
+        let codexIssues = model.codexHealthReport?.issues.count ?? 0
+        return claudeIssues + codexIssues > 0
+    }
+
+    private var hasRepairableIssues: Bool {
+        let claude = model.claudeHealthReport?.repairableIssues.isEmpty == false
+        let codex = model.codexHealthReport?.repairableIssues.isEmpty == false
+        return claude || codex
+    }
+
+    @ViewBuilder
+    private var hookDiagnosticsSection: some View {
+        Section {
+            if let claudeReport = model.claudeHealthReport, !claudeReport.isHealthy {
+                issueList(report: claudeReport)
+            }
+            if let codexReport = model.codexHealthReport, !codexReport.isHealthy {
+                issueList(report: codexReport)
+            }
+
+            if model.claudeHealthReport == nil && model.codexHealthReport == nil {
+                HStack {
+                    Text(lang.t("setup.diagnostics.notRun"))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(lang.t("setup.diagnostics.runCheck")) {
+                        model.runHealthChecks()
+                    }
+                }
+            } else if !hasAnyIssues {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text(lang.t("setup.diagnostics.allHealthy"))
+                    Spacer()
+                    Button(lang.t("setup.diagnostics.recheck")) {
+                        model.runHealthChecks()
+                    }
+                    .font(.caption)
+                }
+            } else {
+                HStack(spacing: 10) {
+                    Button(lang.t("setup.diagnostics.recheck")) {
+                        model.runHealthChecks()
+                    }
+
+                    if hasRepairableIssues {
+                        Button(lang.t("setup.diagnostics.repair")) {
+                            model.repairHooks()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+            }
+        } header: {
+            HStack(spacing: 4) {
+                Text(lang.t("setup.section.diagnostics"))
+                if hasAnyIssues {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption2)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func issueList(report: HookHealthReport) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(report.agent == "claude" ? "Claude Code" : "Codex")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+
+            ForEach(Array(report.issues.enumerated()), id: \.offset) { _, issue in
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: issue.isAutoRepairable ? "wrench.fill" : "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(issue.isAutoRepairable ? .orange : .red)
+                        .frame(width: 14)
+
+                    Text(issue.description)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if let binaryPath = report.binaryPath {
+                Text("Binary: \(binaryPath)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
     }
 
     @ViewBuilder
