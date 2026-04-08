@@ -191,7 +191,7 @@ jobs:
           git checkout -b "$branch" origin/main
           git add appcast.xml
           git commit -m "chore: update appcast.xml for v${{ steps.version.outputs.version }}"
-          git push origin "$branch"
+          git push --force origin "$branch"
           gh pr create \
             --base main \
             --head "$branch" \
