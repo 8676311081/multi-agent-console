@@ -197,3 +197,33 @@
 /* Window Titles */
 "window.settings" = "Open Island 设置";
 "window.debug" = "Open Island 调试";
+
+/* Settings - Auto Response */
+"settings.tab.autoResponse" = "自动回复";
+"settings.autoResponse.title" = "自动回复规则";
+"settings.autoResponse.newRule" = "新建规则";
+"settings.autoResponse.deleteRule" = "删除";
+"settings.autoResponse.editRule" = "编辑";
+"settings.autoResponse.noRules" = "暂无规则。添加规则以自动回复权限请求或问题。";
+"settings.autoResponse.name" = "名称";
+"settings.autoResponse.type" = "类型";
+"settings.autoResponse.type.permission" = "权限";
+"settings.autoResponse.type.question" = "问题";
+"settings.autoResponse.conditions" = "条件";
+"settings.autoResponse.toolNames" = "工具名";
+"settings.autoResponse.toolNames.placeholder" = "Read, Bash, Edit（逗号分隔）";
+"settings.autoResponse.pathPattern" = "路径模式";
+"settings.autoResponse.pathPattern.placeholder" = "/Users/qwen/projects/*（glob 模式）";
+"settings.autoResponse.agentTypes" = "Agent 类型";
+"settings.autoResponse.keywords" = "关键词";
+"settings.autoResponse.keywords.placeholder" = "deploy, build（逗号分隔）";
+"settings.autoResponse.action" = "动作";
+"settings.autoResponse.action.allow" = "允许";
+"settings.autoResponse.action.deny" = "拒绝";
+"settings.autoResponse.action.selectOption" = "选择第 N 项";
+"settings.autoResponse.action.selectByKeyword" = "按关键词选择";
+"settings.autoResponse.action.denyMessage" = "拒绝消息";
+"settings.autoResponse.action.optionIndex" = "选项序号（从 0 开始）";
+"settings.autoResponse.action.keyword" = "关键词";
+"settings.autoResponse.save" = "保存";
+"settings.autoResponse.conflict" = "多条规则匹配时，拒绝优先。";

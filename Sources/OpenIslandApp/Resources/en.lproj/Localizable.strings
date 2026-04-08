@@ -197,3 +197,33 @@
 /* Window Titles */
 "window.settings" = "Open Island Settings";
 "window.debug" = "Open Island Debug";
+
+/* Settings - Auto Response */
+"settings.tab.autoResponse" = "Auto Response";
+"settings.autoResponse.title" = "Auto-Response Rules";
+"settings.autoResponse.newRule" = "New Rule";
+"settings.autoResponse.deleteRule" = "Delete";
+"settings.autoResponse.editRule" = "Edit";
+"settings.autoResponse.noRules" = "No rules configured. Add a rule to auto-respond to permission requests or questions.";
+"settings.autoResponse.name" = "Name";
+"settings.autoResponse.type" = "Type";
+"settings.autoResponse.type.permission" = "Permission";
+"settings.autoResponse.type.question" = "Question";
+"settings.autoResponse.conditions" = "Conditions";
+"settings.autoResponse.toolNames" = "Tool Names";
+"settings.autoResponse.toolNames.placeholder" = "Read, Bash, Edit (comma-separated)";
+"settings.autoResponse.pathPattern" = "Path Pattern";
+"settings.autoResponse.pathPattern.placeholder" = "/Users/qwen/projects/* (glob)";
+"settings.autoResponse.agentTypes" = "Agent Types";
+"settings.autoResponse.keywords" = "Keywords";
+"settings.autoResponse.keywords.placeholder" = "deploy, build (comma-separated)";
+"settings.autoResponse.action" = "Action";
+"settings.autoResponse.action.allow" = "Allow";
+"settings.autoResponse.action.deny" = "Deny";
+"settings.autoResponse.action.selectOption" = "Select Option #";
+"settings.autoResponse.action.selectByKeyword" = "Select by Keyword";
+"settings.autoResponse.action.denyMessage" = "Deny Message";
+"settings.autoResponse.action.optionIndex" = "Option Index (0-based)";
+"settings.autoResponse.action.keyword" = "Keyword";
+"settings.autoResponse.save" = "Save";
+"settings.autoResponse.conflict" = "Deny takes precedence when multiple rules match.";
