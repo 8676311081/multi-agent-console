@@ -18,6 +18,7 @@ final class AppModel {
     private static let showCodexUsageDefaultsKey = "app.showCodexUsage"
     private static let completionReplyEnabledDefaultsKey = "feature.completionReply.enabled"
     private static let suppressFrontmostNotificationsDefaultsKey = "app.suppressFrontmostNotifications"
+    private static let autoResponseRulesDefaultsKey = "autoResponse.rules"
 
     static let defaultStatusColors: [SessionPhase: String] = [
         .running: "#6E9FFF",
@@ -234,6 +235,15 @@ final class AppModel {
             lastActionMessage = isSoundMuted
                 ? "Island sound notifications muted."
                 : "Island sound notifications enabled."
+        }
+    }
+    var autoResponseRules: [AutoResponseRule] = [] {
+        didSet {
+            guard autoResponseRules != oldValue else { return }
+            if let data = try? JSONEncoder().encode(autoResponseRules) {
+                UserDefaults.standard.set(data, forKey: Self.autoResponseRulesDefaultsKey)
+            }
+            bridgeServer.autoResponseRules = autoResponseRules
         }
     }
     var selectedSoundName: String = NotificationSoundService.defaultSoundName {
@@ -496,6 +506,10 @@ final class AppModel {
         watchNotificationEnabled = UserDefaults.standard.bool(forKey: Self.watchNotificationEnabledKey)
         if watchNotificationEnabled {
             startWatchRelay()
+        }
+        if let data = UserDefaults.standard.data(forKey: Self.autoResponseRulesDefaultsKey),
+           let rules = try? JSONDecoder().decode([AutoResponseRule].self, from: data) {
+            autoResponseRules = rules
         }
 
         overlay.appModel = self
@@ -760,6 +774,7 @@ final class AppModel {
 
         do {
             try bridgeServer.start()
+            bridgeServer.autoResponseRules = autoResponseRules
             connectBridgeObserver()
         } catch {
             isBridgeReady = false
