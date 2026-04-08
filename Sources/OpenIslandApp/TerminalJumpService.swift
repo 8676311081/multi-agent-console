@@ -50,6 +50,11 @@ struct TerminalJumpService {
             bundleIdentifier: "fun.tw93.kaku",
             aliases: ["kaku"]
         ),
+        TerminalAppDescriptor(
+            displayName: "Cursor",
+            bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+            aliases: ["cursor"]
+        ),
     ]
 
     private static let ghosttyFocusSettleDelay = 0.08
@@ -111,6 +116,11 @@ struct TerminalJumpService {
                    jumpToWeztermFamilyTerminal(target, cliPath: cliPath, bundleIdentifier: descriptor.bundleIdentifier) {
                     return "Focused the matching \(descriptor.displayName) pane."
                 }
+            case "com.todesktop.230313mzl4w4u92":
+                if let workingDirectory = target.workingDirectory,
+                   jumpToCursorWorkspace(workingDirectory) {
+                    return "Focused the matching Cursor workspace."
+                }
             default:
                 break
             }
@@ -168,6 +178,22 @@ struct TerminalJumpService {
         """
 
         return try runAppleScript(script) == "matched"
+    }
+
+    private func jumpToCursorWorkspace(_ workspacePath: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["cursor", "-r", workspacePath]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
     }
 
     private func jumpToCmuxTerminal(_ target: JumpTarget) -> Bool {
