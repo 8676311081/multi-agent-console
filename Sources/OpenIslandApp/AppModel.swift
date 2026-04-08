@@ -9,6 +9,7 @@ import SwiftUI
 final class AppModel {
     private static let soundMutedDefaultsKey = "overlay.sound.muted"
     private static let showDockIconDefaultsKey = "app.showDockIcon"
+    private static let autoResponseRulesDefaultsKey = "autoResponse.rules"
     private static let syntheticClaudeSessionPrefix = "claude-process:"
     private static let liveSessionStalenessWindow: TimeInterval = 15 * 60
     private static let jumpOverlayDismissLeadTime: Duration = .milliseconds(20)
@@ -156,6 +157,15 @@ final class AppModel {
                 : "Island sound notifications enabled."
         }
     }
+    var autoResponseRules: [AutoResponseRule] = [] {
+        didSet {
+            guard autoResponseRules != oldValue else { return }
+            if let data = try? JSONEncoder().encode(autoResponseRules) {
+                UserDefaults.standard.set(data, forKey: Self.autoResponseRulesDefaultsKey)
+            }
+            bridgeServer.autoResponseRules = autoResponseRules
+        }
+    }
     var selectedSoundName: String = NotificationSoundService.defaultSoundName {
         didSet {
             guard selectedSoundName != oldValue else { return }
@@ -211,6 +221,10 @@ final class AppModel {
         isSoundMuted = UserDefaults.standard.bool(forKey: Self.soundMutedDefaultsKey)
         selectedSoundName = NotificationSoundService.selectedSoundName
         showDockIcon = UserDefaults.standard.bool(forKey: Self.showDockIconDefaultsKey)
+        if let data = UserDefaults.standard.data(forKey: Self.autoResponseRulesDefaultsKey),
+           let rules = try? JSONDecoder().decode([AutoResponseRule].self, from: data) {
+            autoResponseRules = rules
+        }
 
         overlay.appModel = self
         overlay.restoreDisplayPreference()
@@ -466,6 +480,7 @@ final class AppModel {
 
         do {
             try bridgeServer.start()
+            bridgeServer.autoResponseRules = autoResponseRules
             connectBridgeObserver()
         } catch {
             isBridgeReady = false
