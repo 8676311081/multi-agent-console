@@ -89,11 +89,11 @@ final class ProcessMonitoringCoordinator {
 
         // Work on a local copy to avoid triggering didSet (and its queue.sync +
         // view invalidation) on every intermediate mutation.
-        var local = state
+        let originalState = state
+        var local = originalState
 
         let sanitizedSessions = sanitizeCrossToolGhosttyJumpTargets(in: local.sessions)
-        let sanitizedSessionsChanged = sanitizedSessions != local.sessions
-        if sanitizedSessionsChanged {
+        if sanitizedSessions != local.sessions {
             local = SessionState(sessions: sanitizedSessions)
         }
 
@@ -101,18 +101,17 @@ final class ProcessMonitoringCoordinator {
             existingSessions: local.sessions,
             activeProcesses: activeProcesses
         )
-        let syntheticSessionsChanged = mergedSessions != local.sessions
-        if syntheticSessionsChanged {
+        if mergedSessions != local.sessions {
             local = SessionState(sessions: mergedSessions)
         }
 
         // Adopt process TTYs inline on local copy.
-        let ttyAdopted = adoptProcessTTYsForClaudeSessions(activeProcesses: activeProcesses, sessions: &local)
+        adoptProcessTTYsForClaudeSessions(activeProcesses: activeProcesses, sessions: &local)
 
         let sessions = local.sessions.filter(\.isTrackedLiveSession)
         guard !sessions.isEmpty else {
-            // Flush local changes if any early mutations happened.
-            if sanitizedSessionsChanged || syntheticSessionsChanged || ttyAdopted {
+            // Flush local changes only if something actually changed.
+            if local != originalState {
                 state = local
             }
             isResolvingInitialLiveSessions = false
@@ -143,8 +142,8 @@ final class ProcessMonitoringCoordinator {
             }
         }
 
-        let attachmentsChanged = local.reconcileAttachmentStates(attachmentUpdates)
-        let jumpTargetsChanged = local.reconcileJumpTargets(jumpTargetUpdates)
+        _ = local.reconcileAttachmentStates(attachmentUpdates)
+        _ = local.reconcileJumpTargets(jumpTargetUpdates)
 
         // Phase 1: populate isProcessAlive in parallel with existing system.
         let aliveIDs = sessionIDsWithAliveProcesses(activeProcesses: activeProcesses)
@@ -163,11 +162,14 @@ final class ProcessMonitoringCoordinator {
         }
 
         // Phase 4: remove sessions that are no longer visible.
-        let removedInvisible = local.removeInvisibleSessions()
+        _ = local.removeInvisibleSessions()
 
         // Single state assignment — triggers didSet exactly once.
-        let anyChange = sanitizedSessionsChanged || syntheticSessionsChanged || ttyAdopted
-            || attachmentsChanged || jumpTargetsChanged || removedInvisible
+        // Compare against the original snapshot to catch all mutations
+        // (including liveness and resolver jump targets) and skip the
+        // write when nothing actually changed, avoiding unnecessary
+        // SwiftUI view invalidation.
+        let anyChange = local != originalState
         if anyChange {
             state = local
         }
