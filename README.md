@@ -5,79 +5,59 @@
 <h1 align="center">Open Island</h1>
 
 <p align="center">
-  The open-source macOS companion for AI coding agents.
+  <strong>Why pay for a closed-source app just to monitor your coding agents?</strong>
   <br>
+  Open-source, local-first, native macOS companion for AI coding agents.
+  <br><br>
   <a href="README.zh-CN.md">中文</a> | <strong>English</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Octane0411/open-vibe-island/releases">Releases</a> ·
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="docs/roadmap.md">Roadmap</a> ·
-  <a href="#contributing">Contributing</a>
-</p>
-
-<p align="center">
   <a href="https://github.com/Octane0411/open-vibe-island/releases/latest"><img src="https://img.shields.io/github/v/release/Octane0411/open-vibe-island?style=flat-square&label=release&color=blue" alt="Latest Release"></a>
+  <a href="https://github.com/Octane0411/open-vibe-island/stargazers"><img src="https://img.shields.io/github/stars/Octane0411/open-vibe-island?style=flat-square&color=yellow" alt="Stars"></a>
   <a href="https://discord.gg/4ackNAutyY"><img src="https://img.shields.io/discord/1490752192368476253?style=flat-square&logo=discord&label=discord&color=5865F2" alt="Discord"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL%20v3-green?style=flat-square" alt="License: GPL v3"></a>
 </p>
 
----
-
-## 📰 News
-
-> Open Island is evolving fast — here's what's new.
-
-- **2026-04-08** 🔐 **v1.0.0 → v1.0.7** released — First signed & notarized build. Added multi-agent support (**Qoder**, **Factory**, **CodeBuddy**), Intel Mac support, approval UI, Sparkle auto-update, and animation polish.
-
-- **2026-04-06** 🧩 **OpenCode** plugin integration and **iTerm2** jump-back support landed.
-
-- **2026-04-05** 🚀 **v0.1.1** — First public release with **Claude Code** & **Codex** support, **Terminal.app** & **Ghostty** integration.
-
----
-
-## Human Parts
-
-This section is written for humans.
-
-### What This Is
-
-An open-source [Vibe Island](https://vibeisland.app/) alternative for heavy code-agent users on macOS. Currently supports **Claude Code**, **Codex**, **Cursor**, **OpenCode**, **Qoder**, **Qwen Code**, **Factory**, and **CodeBuddy**, with terminal integration for **Terminal.app**, **Ghostty**, **cmux**, **Kaku**, **WezTerm**, **iTerm2**, and **Zellij**, workspace-level jump for **VS Code**, **Cursor**, **Windsurf**, **Trae**, and **JetBrains IDEs** (IDEA, WebStorm, PyCharm, GoLand, CLion, RubyMine, PhpStorm, Rider, RustRover), plus fallback detection for Warp.
-
-This is a community project. We provide the basics: code agent communication, a mac island app shell, and some fundamental features. We welcome anyone to build on top of this and turn ideas into real features for everyone. Read the [Roadmap](docs/roadmap.md) and [Contributing](CONTRIBUTING.md) docs for more info.
-
 <p align="center">
-  <img src="docs/images/screenshot-overview.png" alt="Open Island screenshot" width="720">
+  <a href="https://github.com/Octane0411/open-vibe-island/releases">Download</a> ·
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="docs/roadmap.md">Roadmap</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-### Motivation
+<p align="center">
+  <img src="docs/images/demo.gif" alt="Open Island in action" width="720">
+</p>
 
-I do not want to run a closed-source paid app on my own computer just to monitor my entire production flow, so I built an open-source version instead.
+---
 
-> you don't need to pay for a product you can vibe since you are a vibe coder
+## What is Open Island?
 
-### How To Use It
+Open Island sits in your Mac's **notch** (or top bar) and gives you a real-time control surface for your AI coding agents — session status, permission approvals, and instant jump-back to the right terminal. All without leaving your flow.
 
-- Download an early build from [GitHub Releases](https://github.com/Octane0411/open-vibe-island/releases), or build from source.
-- Fork this repository and vibe your own version.
-- If you hit a bug or a usage problem, open an issue or report it in the WeChat group — we'll do our best to address it.
-- If you have a good idea, open an issue or discuss it in the WeChat group, or directly submit a PR with a demo and feature description — we welcome any product suggestions and ideas.
+Think of it as an open-source [Vibe Island](https://vibeisland.app/) — **free, local-first, and you own every bit of it**.
 
-### Community
+> *You don't need to pay for a product you can vibe, since you are a vibe coder.*
 
-The project is still at an early stage — you may encounter issues along the way. Join the WeChat group or Discord for faster feedback and higher resolution priority.
-We welcome any issues and pull requests. We are also looking for others to join as maintainers. WeChat group:
+## Why Open Island?
 
-<img src="docs/images/wechat-group.jpg" alt="Open Island WeChat group QR code" width="360">
+- **Open source** — GPL v3, fork it, mod it, ship your own version
+- **Local-first** — No server, no telemetry, no account. Everything runs on your Mac
+- **Native macOS** — SwiftUI + AppKit, not an Electron wrapper
+- **Multi-agent** — One surface for Claude Code, Codex, Cursor, OpenCode, and more
+- **Multi-terminal** — Jump back to the exact terminal/IDE session in one click
 
-### Notes
+## Supported Agents & Terminals
 
-This app may install hooks for Claude Code, Codex, or Cursor, so you may see hook-related output inside those sessions. See [docs/hooks.md](docs/hooks.md) for the full list of supported hook events and the directive protocol.
+**8 agents**: Claude Code, Codex, Cursor, OpenCode, Qoder, Qwen Code, Factory, CodeBuddy
 
-### Feature Status
+**14+ terminals & IDEs**: Terminal.app, Ghostty, iTerm2, WezTerm, Zellij, cmux, Kaku, VS Code, Cursor, Windsurf, Trae, JetBrains IDEs (IDEA, WebStorm, PyCharm, GoLand, CLion, RubyMine, PhpStorm, Rider, RustRover)
 
-#### Supported Code Agents
+<details>
+<summary>Full compatibility table</summary>
+
+### Code Agents
 
 | Agent | Status | Description |
 |---|---|---|
@@ -91,46 +71,110 @@ This app may install hooks for Claude Code, Codex, or Cursor, so you may see hoo
 | **Cursor** | Supported | Hook integration via `~/.cursor/hooks.json`, session tracking, workspace jump-back |
 | **Gemini CLI** | Planned | — |
 
-#### Supported Terminals
+### Terminals & IDEs
 
-| Terminal | Status | Description |
+| Terminal / IDE | Support Level | Description |
 |---|---|---|
-| **Terminal.app** | Full Support | Jump-back with TTY targeting |
-| **Ghostty** | Full Support | Jump-back with ID matching |
-| **cmux** | Full Support | Jump-back via Unix socket API |
-| **Kaku** | Full Support | Jump-back via CLI pane targeting |
-| **WezTerm** | Full Support | Jump-back via CLI pane targeting |
-| **iTerm2** | Full Support | Jump-back with session ID / TTY matching |
-| **Zellij** | Full Support | Jump-back via CLI pane/tab targeting |
-| **VS Code** | Workspace Jump | Activate workspace via `code` CLI |
-| **VS Code Insiders** | Workspace Jump | Activate workspace via `code-insiders` CLI |
-| **Cursor** | Workspace Jump | Activate workspace via `cursor` CLI |
-| **Windsurf** | Workspace Jump | Activate workspace via `windsurf` CLI |
-| **Trae** | Workspace Jump | Activate workspace via `trae` CLI |
-| **JetBrains IDEs** | Workspace Jump | Activate project via IDE CLI (IDEA, WebStorm, PyCharm, GoLand, CLion, RubyMine, PhpStorm, Rider, RustRover) |
+| **Terminal.app** | Full | Jump-back with TTY targeting |
+| **Ghostty** | Full | Jump-back with ID matching |
+| **cmux** | Full | Jump-back via Unix socket API |
+| **Kaku** | Full | Jump-back via CLI pane targeting |
+| **WezTerm** | Full | Jump-back via CLI pane targeting |
+| **iTerm2** | Full | Jump-back with session ID / TTY matching |
+| **Zellij** | Full | Jump-back via CLI pane/tab targeting |
+| **VS Code** | Workspace | Activate workspace via `code` CLI |
+| **Cursor** | Workspace | Activate workspace via `cursor` CLI |
+| **Windsurf** | Workspace | Activate workspace via `windsurf` CLI |
+| **Trae** | Workspace | Activate workspace via `trae` CLI |
+| **JetBrains IDEs** | Workspace | IDEA, WebStorm, PyCharm, GoLand, CLion, RubyMine, PhpStorm, Rider, RustRover |
 | **Warp** | Planned | Fallback detection only |
 
-#### Other Features
+### Other Features
 
-| Feature | Status | Description |
-|---|---|---|
-| Notch / Top-bar overlay | Supported | Notch area on notch Macs, top-center bar on others |
-| Control center | Supported | Hook status, usage dashboard |
-| Settings | Supported | General, Display, Sound, Shortcuts, Lab, About |
-| Notification mode | Supported | Auto-height panel for permission requests and session events |
-| Notification sounds | Supported | Configurable system sounds, mute toggle |
-| i18n | Supported | English, Simplified Chinese |
-| Session discovery | Supported | Auto-discover from local transcripts, persist across launches |
-| Process discovery | Supported | Match active agents via `ps`/`lsof` |
-| DMG packaging | Supported | Signing, notarization, GitHub Actions release workflow |
-| Auto-update | Supported | Sparkle-based automatic updates with appcast |
+| Feature | Description |
+|---|---|
+| Notch / top-bar overlay | Notch area on notch Macs, top-center bar on others |
+| Control center | Hook status, usage dashboard |
+| Notification mode | Auto-height panel for permission requests and session events |
+| Notification sounds | Configurable system sounds, mute toggle |
+| i18n | English, Simplified Chinese |
+| Session discovery | Auto-discover from local transcripts, persist across launches |
+| Auto-update | Sparkle-based automatic updates |
+| Signed & notarized | DMG packaging with Apple notarization |
 
-### Report a Bug via Your Code Agent
+</details>
 
-If you run into a problem, copy the prompt below into your code agent (Claude Code, Codex, etc.) and it will automatically collect environment info and create a well-structured issue for you.
+## Quick Start
+
+### Option 1: Download
+
+Grab the latest DMG from [GitHub Releases](https://github.com/Octane0411/open-vibe-island/releases) — signed and notarized, ready to run.
+
+### Option 2: Build from source
+
+```bash
+git clone https://github.com/Octane0411/open-vibe-island.git
+cd open-vibe-island
+open Package.swift   # Opens in Xcode — hit Run
+```
+
+On first launch, Open Island auto-discovers your active agent sessions and starts the live bridge. Hook installation is managed from the **Control Center** inside the app.
+
+> **Requirements**: macOS 14+, Swift 6.2, Xcode
+
+## How It Works
+
+```
+Agent (Claude Code / Codex / Cursor / ...)
+  ↓ hook event
+OpenIslandHooks CLI (stdin → Unix socket)
+  ↓ JSON envelope
+BridgeServer (in-app)
+  ↓ state update
+Notch overlay UI ← you see it here
+  ↓ click
+Jump back → correct terminal / IDE
+```
+
+Hooks **fail open** — if Open Island isn't running, your agents continue unaffected.
 
 <details>
-<summary>Click to expand the prompt</summary>
+<summary>Architecture details</summary>
+
+Four targets in one Swift package:
+
+| Target | Role |
+|---|---|
+| **OpenIslandApp** | SwiftUI + AppKit shell — menu bar, overlay panel, control center, settings |
+| **OpenIslandCore** | Shared library — models, bridge transport (Unix socket IPC), hooks, session persistence |
+| **OpenIslandHooks** | Lightweight CLI invoked by agent hooks, forwards payloads via Unix socket |
+| **OpenIslandSetup** | Installer CLI for managing `~/.codex/config.toml` and hook entries |
+
+See [docs/architecture.md](docs/architecture.md) for the full system design.
+
+</details>
+
+## Community
+
+Join us on **Discord** for discussion, feedback, and faster issue resolution:
+
+[![Discord](https://img.shields.io/discord/1490752192368476253?style=for-the-badge&logo=discord&label=Join%20Discord&color=5865F2)](https://discord.gg/4ackNAutyY)
+
+We welcome issues, pull requests, and new maintainers. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+
+<details>
+<summary>WeChat group (for Chinese-speaking users)</summary>
+
+<img src="docs/images/wechat-group.jpg" alt="WeChat group QR code" width="240">
+
+</details>
+
+## Report a Bug via Your Code Agent
+
+Copy this prompt into your agent (Claude Code, Codex, etc.) to auto-generate a well-structured issue:
+
+<details>
+<summary>Click to expand</summary>
 
 ```
 I'm having an issue with Open Island (https://github.com/Octane0411/open-vibe-island).
@@ -159,7 +203,7 @@ Repository: Octane0411/open-vibe-island
 
 </details>
 
-### Star History
+## Star History
 
 <a href="https://star-history.com/#Octane0411/open-vibe-island&Date">
  <picture>
@@ -169,7 +213,7 @@ Repository: Octane0411/open-vibe-island
  </picture>
 </a>
 
-### Contributors
+## Contributors
 
 <a href="https://github.com/Octane0411/open-vibe-island/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=Octane0411/open-vibe-island" />
@@ -185,7 +229,7 @@ The open-source macOS companion for terminal-native AI coding.
 
 `Open Island` puts a lightweight control surface in your notch or top bar so you can keep an eye on live coding agents, follow session progress, and jump back to the right terminal without breaking flow.
 
-## Why This Product Exists
+### Why This Product Exists
 
 AI coding is becoming part of the daily development loop, but the surrounding control layer still too often means handing your machine over to a closed-source paid app.
 
@@ -196,11 +240,9 @@ AI coding is becoming part of the daily development loop, but the surrounding co
 - Native macOS (SwiftUI + AppKit)
 - Built to support the terminal workflow, not replace it
 
-## Who It Is For
+### Who It Is For
 
 Developers who already live in the terminal and want a better way to work with coding agents on macOS without losing context.
-
-## Features
 
 ### Agent Integrations
 
@@ -247,7 +289,7 @@ Four targets in one Swift package:
 | **OpenIslandHooks** | Lightweight CLI invoked by agent hooks, forwards payloads via Unix socket |
 | **OpenIslandSetup** | Installer CLI for managing `~/.codex/config.toml` and hook entries |
 
-## Quick Start
+### Quick Start (Agent)
 
 Build and run locally:
 
@@ -263,7 +305,7 @@ zsh scripts/package-app.sh
 
 That script creates `output/package/Open Island.app` and `output/package/Open Island.zip`. Pass `OPEN_ISLAND_SIGN_IDENTITY` to sign the bundle. See [docs/packaging.md](docs/packaging.md) for the full path, including notarization.
 
-### Connect Codex
+#### Connect Codex
 
 Open the package in Xcode to run the macOS app target. On launch, the app restores its local cache, scans recent `~/.codex/sessions/**/rollout-*.jsonl` files for existing Codex sessions, and starts the live bridge for new hook events.
 
@@ -276,34 +318,25 @@ swift run OpenIslandSetup status
 swift run OpenIslandSetup uninstall
 ```
 
-### Connect Claude Code
+#### Connect Claude Code
 
 Claude usage setup is available from the app's control center and remains opt-in. The bridge writes a managed `statusLine.command` to `~/.open-island/bin/open-island-statusline`, caches `rate_limits` into `/tmp/open-island-rl.json`, and refuses to overwrite an existing custom status line automatically.
 
-## Repository Map
+### Repository Map
 
 - Start with [docs/index.md](docs/index.md) for the current doc map.
 - Read [docs/quality.md](docs/quality.md) for the quality baseline and verification approach.
 - Read [docs/hooks.md](docs/hooks.md) for all supported hook events, payload fields, and directive response formats.
 - Run `scripts/harness.sh` for automated checks (docs validation, tests, build).
 
-## Requirements
+### Requirements
 
 - macOS 14+
 - Swift 6.2
 - Xcode (for the app target)
 
-## Product Direction
+---
 
-The goal is simple: make AI coding feel native on macOS.
+## License
 
-That means:
-
-- Less context switching
-- Less tab hunting
-- Less friction around session awareness
-- A faster path back to the active agent session
-
-## Contributing
-
-The project is still at an early stage. Issues and pull requests are welcome.
+[GPL v3](LICENSE)
