@@ -59,6 +59,59 @@ public struct WarpSQLiteReader: Sendable {
         return String(cString: cString)
     }
 
+    /// Resolves the pane UUID of the currently focused pane in the currently
+    /// active Warp window. This is what drives the polling loop during a
+    /// precision jump.
+    ///
+    /// Returns uppercase hex string suitable for direct comparison to the
+    /// output of `lookupPaneUUID`. Returns nil on any error or if there is
+    /// no active window.
+    public func currentFocusedPaneUUID() -> String? {
+        guard let db = openReadOnly() else { return nil }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+        SELECT hex(tp.uuid)
+        FROM tabs t
+        JOIN pane_nodes pn ON pn.tab_id = t.id AND pn.is_leaf = 1
+        JOIN terminal_panes tp ON tp.id = pn.id
+        WHERE t.window_id = (SELECT active_window_id FROM app LIMIT 1)
+        ORDER BY t.id
+        LIMIT 1 OFFSET (
+            SELECT active_tab_index FROM windows
+            WHERE id = (SELECT active_window_id FROM app LIMIT 1)
+        );
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        guard let cString = sqlite3_column_text(stmt, 0) else { return nil }
+        return String(cString: cString)
+    }
+
+    /// Returns the number of tabs in the currently active Warp window.
+    /// Used as the upper bound for the keystroke cycle retry loop during
+    /// precision jump. Returns 0 on any error.
+    public func tabCountInActiveWindow() -> Int {
+        guard let db = openReadOnly() else { return 0 }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+        SELECT COUNT(*) FROM tabs
+        WHERE window_id = (SELECT active_window_id FROM app LIMIT 1);
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int(stmt, 0))
+    }
+
     // MARK: - Internal
 
     private func openReadOnly() -> OpaquePointer? {

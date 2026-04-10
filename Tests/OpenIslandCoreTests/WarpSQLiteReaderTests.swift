@@ -45,6 +45,39 @@ struct WarpSQLiteReaderTests {
         let reader = WarpSQLiteReader(databasePath: "/nonexistent/path/warp.sqlite")
         #expect(reader.lookupPaneUUID(forCwd: "/any") == nil)
     }
+
+    @Test
+    func currentFocusedPaneUUIDReturnsActiveTabsUUID() throws {
+        let tmp = NSTemporaryDirectory() + "warp-fixture-\(UUID().uuidString).sqlite"
+        try WarpSQLiteFixture.write(to: tmp, scenario: .threeTabsTwoClaudes)
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+
+        // Scenario has active_tab_index = 1 which is tab id 2 (open-vibe-island).
+        let reader = WarpSQLiteReader(databasePath: tmp)
+        #expect(reader.currentFocusedPaneUUID() == "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
+    }
+
+    @Test
+    func currentFocusedPaneUUIDReturnsNilForMissingDatabase() {
+        let reader = WarpSQLiteReader(databasePath: "/nonexistent.sqlite")
+        #expect(reader.currentFocusedPaneUUID() == nil)
+    }
+
+    @Test
+    func tabCountInActiveWindowReturnsCount() throws {
+        let tmp = NSTemporaryDirectory() + "warp-fixture-\(UUID().uuidString).sqlite"
+        try WarpSQLiteFixture.write(to: tmp, scenario: .threeTabsTwoClaudes)
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+
+        let reader = WarpSQLiteReader(databasePath: tmp)
+        #expect(reader.tabCountInActiveWindow() == 3)
+    }
+
+    @Test
+    func tabCountInActiveWindowReturnsZeroForMissingDatabase() {
+        let reader = WarpSQLiteReader(databasePath: "/nonexistent.sqlite")
+        #expect(reader.tabCountInActiveWindow() == 0)
+    }
 }
 
 // MARK: - Fixture
