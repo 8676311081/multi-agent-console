@@ -154,6 +154,9 @@ struct IslandPanelView: View {
 
     /// Scout icon tint: blue if any running, green if any live, else gray.
     private var scoutTint: Color {
+        if model.isCustomAppearance, let phase = closedSpotlightSession?.phase {
+            return model.statusColor(for: phase)
+        }
         let sessions = model.surfacedSessions
         if sessions.contains(where: { $0.phase == .running }) {
             return Color(red: 0.43, green: 0.62, blue: 1.0) // #6E9FFF working blue
@@ -321,8 +324,17 @@ struct IslandPanelView: View {
             HStack(spacing: 0) {
                 if hasClosedPresence {
                     HStack(spacing: 4) {
-                        OpenIslandIcon(size: 14, isAnimating: hasClosedActivity, tint: scoutTint)
+                        if model.isCustomAppearance {
+                            IslandPixelGlyph(
+                                tint: scoutTint,
+                                style: model.islandPixelShapeStyle,
+                                isAnimating: hasClosedActivity
+                            )
                             .matchedGeometryEffect(id: "island-icon", in: notchNamespace, isSource: true)
+                        } else {
+                            OpenIslandIcon(size: 14, isAnimating: hasClosedActivity, tint: scoutTint)
+                                .matchedGeometryEffect(id: "island-icon", in: notchNamespace, isSource: true)
+                        }
 
                         if closedSpotlightSession?.phase.requiresAttention == true {
                             AttentionIndicator(
@@ -568,7 +580,10 @@ struct IslandPanelView: View {
     }
 
     private func phaseColor(_ phase: SessionPhase) -> Color {
-        switch phase {
+        if model.isCustomAppearance {
+            return model.statusColor(for: phase)
+        }
+        return switch phase {
         case .running: .mint
         case .waitingForApproval: .orange
         case .waitingForAnswer: .yellow
