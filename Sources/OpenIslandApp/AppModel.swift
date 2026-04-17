@@ -26,6 +26,7 @@ final class AppModel {
         .completed: "#42E86B",
     ]
     private static let syntheticClaudeSessionPrefix = "claude-process:"
+    private static let syntheticAgentSessionPrefix = "agent-process:"
     private static let liveSessionStalenessWindow: TimeInterval = 15 * 60
     private static let jumpOverlayDismissLeadTime: Duration = .milliseconds(20)
     static let hoverOpenDelay: TimeInterval = 0.15
@@ -538,6 +539,7 @@ final class AppModel {
         }
 
         monitoring.syntheticClaudeSessionPrefix = Self.syntheticClaudeSessionPrefix
+        monitoring.syntheticAgentSessionPrefix = Self.syntheticAgentSessionPrefix
         monitoring.stateAccessor = { [weak self] in self?.state ?? SessionState() }
         monitoring.stateUpdater = { [weak self] in self?.state = $0 }
         monitoring.onSessionsReconciled = { [weak self] in
