@@ -914,7 +914,7 @@ struct SetupSettingsPane: View {
 struct WatchSettingsPane: View {
     var model: AppModel
 
-    @State private var pairingCode: String = "----"
+    @State private var pairingCode: String = "------"
 
     var body: some View {
         Form {

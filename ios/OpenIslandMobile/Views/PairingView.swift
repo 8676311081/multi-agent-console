@@ -135,10 +135,10 @@ struct PairingView: View {
                         .keyboardType(.decimalPad)
                     TextField("端口", text: $manualPort)
                         .keyboardType(.numberPad)
-                    TextField("4 位配对码", text: $manualCode)
+                    TextField("6 位配对码", text: $manualCode)
                         .keyboardType(.numberPad)
                         .onChange(of: manualCode) { _, newValue in
-                            let filtered = String(newValue.filter(\.isNumber).prefix(4))
+                            let filtered = String(newValue.filter(\.isNumber).prefix(6))
                             if filtered != newValue {
                                 manualCode = filtered
                             }
@@ -170,7 +170,7 @@ struct PairingView: View {
                                 .frame(maxWidth: .infinity)
                         }
                     }
-                    .disabled(manualHost.isEmpty || manualCode.count != 4 || isManualPairing)
+                    .disabled(manualHost.isEmpty || manualCode.count != 6 || isManualPairing)
                 }
             }
             .navigationTitle("手动连接")
@@ -223,19 +223,18 @@ struct PairingView: View {
             }
 
             VStack(spacing: 12) {
-                Text("请输入 Mac 上显示的 4 位配对码")
+                Text("请输入 Mac 上显示的 6 位配对码")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                TextField("0000", text: $pairingCode)
+                TextField("000000", text: $pairingCode)
                     .keyboardType(.numberPad)
                     .font(.system(size: 36, weight: .bold, design: .monospaced))
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 200)
+                    .frame(maxWidth: 260)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: pairingCode) { _, newValue in
-                        // Limit to 4 digits
-                        let filtered = String(newValue.filter(\.isNumber).prefix(4))
+                        let filtered = String(newValue.filter(\.isNumber).prefix(6))
                         if filtered != newValue {
                             pairingCode = filtered
                         }
@@ -260,7 +259,7 @@ struct PairingView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(pairingCode.count != 4 || isPairing)
+            .disabled(pairingCode.count != 6 || isPairing)
             .padding(.horizontal, 40)
 
             Button("选择其他 Mac") {
