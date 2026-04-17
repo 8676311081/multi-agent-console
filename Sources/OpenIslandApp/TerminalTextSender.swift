@@ -152,11 +152,27 @@ struct TerminalTextSender {
 
     // MARK: - Helpers
 
+    // Escape a value for embedding inside an AppleScript double-quoted string
+    // literal. AppleScript string literals do not support C-style `\n` escapes,
+    // so any control character in the input would either terminate the literal
+    // early (newline/CR) or produce a compile error. We encode each control
+    // char as `" & (ASCII character N) & "` so the literal stays well-formed
+    // and a crafted newline in the input can't break out and inject further
+    // AppleScript statements.
     private static func escapeAppleScript(_ value: String?) -> String {
         guard let value else { return "" }
-        return value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
+        var out = ""
+        out.reserveCapacity(value.utf8.count)
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\\": out += #"\\"#
+            case "\"": out += #"\""#
+            case _ where scalar.value < 0x20 || scalar.value == 0x7F:
+                out += "\" & (ASCII character \(scalar.value)) & \""
+            default: out.unicodeScalars.append(scalar)
+            }
+        }
+        return out
     }
 
     private static func runAppleScript(_ script: String) -> Bool {

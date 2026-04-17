@@ -1274,14 +1274,24 @@ struct TerminalJumpService {
         }
     }
 
+    // See TerminalTextSender.escapeAppleScript for rationale. Control
+    // characters in user-influenced values (paneTitle, workingDirectory,
+    // terminalSessionID, terminalTTY) could otherwise terminate the quoted
+    // string early and inject AppleScript.
     private func escapeAppleScript(_ value: String?) -> String {
-        guard let value else {
-            return ""
+        guard let value else { return "" }
+        var out = ""
+        out.reserveCapacity(value.utf8.count)
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\\": out += #"\\"#
+            case "\"": out += #"\""#
+            case _ where scalar.value < 0x20 || scalar.value == 0x7F:
+                out += "\" & (ASCII character \(scalar.value)) & \""
+            default: out.unicodeScalars.append(scalar)
+            }
         }
-
-        return value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
+        return out
     }
 }
 
