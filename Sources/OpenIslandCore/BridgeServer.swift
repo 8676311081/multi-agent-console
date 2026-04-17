@@ -123,10 +123,23 @@ public final class BridgeServer: @unchecked Sendable {
                 throw BridgeTransportError.systemCallFailed("setsockopt", errno)
             }
 
+            // Narrow process umask before bind() so the socket inode is
+            // created with mode 0600 even on systems where the default
+            // umask is permissive. Restore immediately after to avoid
+            // affecting unrelated file creations on the same queue.
+            let savedUmask = umask(0o077)
+            defer { _ = umask(savedUmask) }
+
             try withUnixSocketAddress(path: url.path) { address, length in
                 guard bind(fd, address, length) != -1 else {
                     throw BridgeTransportError.systemCallFailed("bind", errno)
                 }
+            }
+
+            // Belt-and-suspenders: assert 0600 on the inode even if the
+            // platform ignored umask or the filesystem applied a default ACL.
+            if chmod(url.path, 0o600) != 0 {
+                throw BridgeTransportError.systemCallFailed("chmod", errno)
             }
 
             guard listen(fd, 16) != -1 else {

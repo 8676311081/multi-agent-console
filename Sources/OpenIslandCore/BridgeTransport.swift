@@ -31,9 +31,11 @@ public enum BridgeSocketLocation {
         return defaultURL
     }
 
+    #if DEBUG
     public static func uniqueTestURL() -> URL {
         URL(fileURLWithPath: "/tmp/open-island-test-\(UUID().uuidString).sock")
     }
+    #endif
 }
 
 public enum BridgeTransportError: Error, LocalizedError {
