@@ -589,7 +589,17 @@ final class ProcessMonitoringCoordinator {
 
         if let processCWD,
            sameToolSessions.contains(where: { session in
-               normalizedPathForMatching(session.jumpTarget?.workingDirectory) == processCWD
+               guard normalizedPathForMatching(session.jumpTarget?.workingDirectory) == processCWD else {
+                   return false
+               }
+               // Skip sessions whose TTY is known but differs from the process —
+               // they belong to a different terminal and should not consume this
+               // process's slot. Without this, two agents in the same cwd but
+               // different terminals collapse into one session.
+               guard let sessionTTY = normalizedTTYForMatching(session.jumpTarget?.terminalTTY) else {
+                   return true
+               }
+               return processTTY == nil || sessionTTY == processTTY
            }) {
             return true
         }
