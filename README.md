@@ -155,6 +155,39 @@ See [docs/architecture.md](docs/architecture.md) for the full system design.
 
 </details>
 
+## FAQ
+
+**Is Open Island an open-source alternative to Vibe Island?**
+Yes. Open Island is a free, open-source (GPL v3), local-first alternative to [Vibe Island](https://vibeisland.app/) — fork it, modify it, ship your own build.
+
+| | Open Island | Vibe Island |
+|---|---|---|
+| License | GPL v3 (open source) | Proprietary |
+| Price | Free | Paid |
+| Source code | Public, forkable | Closed |
+| Runs | Locally, no server | — |
+
+**Which AI coding agents does Open Island support?**
+9 agents: Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Qoder, Qwen Code, Factory, and CodeBuddy — one surface for all of them.
+
+**Does Open Island require a Mac with a notch?**
+No. On non-notch Macs and external displays, it falls back to a compact top-center bar.
+
+**Does Open Island send my data anywhere?**
+No. It's local-first — no server, no telemetry, no account. Everything runs on your Mac.
+
+**Does Open Island work with tmux, iTerm2, Ghostty, VS Code, Cursor, Warp?**
+Yes — 15+ terminals and IDEs. Full jump-back for terminals (Terminal.app, Ghostty, iTerm2, tmux, WezTerm, Zellij, cmux, Kaku, Warp); workspace-level jump for IDEs (VS Code, Cursor, Windsurf, Trae, JetBrains family).
+
+**How does Open Island integrate with Claude Code / Codex / Cursor?**
+Via each agent's native hook system (e.g., `~/.claude/settings.json`, `~/.codex/config.toml`, `~/.cursor/hooks.json`). Install/uninstall is managed inside the app. Hooks **fail open** — if Open Island isn't running, your agent continues unaffected.
+
+**Can Open Island read my source code?**
+No. It only receives hook events (session start, prompt submit, permission requests, stop). It doesn't read your project files.
+
+**How do I contribute?**
+All code in the project is AI-produced. Paste the prompt from [CONTRIBUTING.md](CONTRIBUTING.md) into your coding agent and start iterating.
+
 ## Community
 
 Join us on **Discord** for discussion, feedback, and faster issue resolution:
