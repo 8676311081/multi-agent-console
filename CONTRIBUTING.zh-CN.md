@@ -96,9 +96,11 @@
 
 Open Island 是一个原生 macOS 应用，作为 AI 编程代理的桌面伴侣。它驻留在刘海/顶栏区域，监控本地代理会话、展示权限请求、回答问题，并提供"跳转回"对应终端上下文的能力。完全本地运行，无需服务端。
 
-**支持的代理**: Codex, Claude Code
+**支持的代理**（9 个）: Claude Code、Codex、Cursor、Gemini CLI、OpenCode、Qoder、Qwen Code、Factory、CodeBuddy
 
-**支持的终端**: Terminal.app, Ghostty
+**支持的终端和 IDE**（15+）: Terminal.app、Ghostty、iTerm2、WezTerm、Zellij、tmux、cmux、Kaku、Warp、VS Code、Cursor、Windsurf、Trae、JetBrains 全家桶（IDEA、WebStorm、PyCharm、GoLand、CLion、RubyMine、PhpStorm、Rider、RustRover）
+
+完整兼容列表见 [README](README.zh-CN.md#支持的-agents-和终端)。
 
 ### 环境要求
 
