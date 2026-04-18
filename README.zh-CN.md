@@ -32,6 +32,16 @@
 
 ---
 
+> ℹ️ **关于本仓库**
+>
+> 本仓库是 [**Octane0411/open-vibe-island**](https://github.com/Octane0411/open-vibe-island) 的社区文档伴随仓库，面向中文开发者做了文档强化和「多 agent macOS 控制台」定位重塑。
+>
+> - **二进制 / Release**——签名公证的 DMG 统一从[上游 Releases](https://github.com/Octane0411/open-vibe-island/releases) 下载。本仓库不单独发版。
+> - **代码贡献**——请直接向[上游仓库](https://github.com/Octane0411/open-vibe-island) 提 PR。
+> - **本仓库的分工**——中英双语 README 打磨、FAQ、中文社区 onboarding、文档同步。
+
+---
+
 ## Open Island 是什么？
 
 Open Island 驻留在 Mac 的**刘海区域**（或顶部栏），为你的 AI coding agents 提供实时控制面板——会话状态、权限审批、一键跳回正确的终端。全程不打断你的工作流。
