@@ -690,6 +690,7 @@ struct LLMSpendStatsView: View {
         case .claudeCode: return .orange
         case .codex:      return .blue
         case .cursor:     return .purple
+        case .copilot:    return .green
         case .unknown:    return .secondary
         }
     }

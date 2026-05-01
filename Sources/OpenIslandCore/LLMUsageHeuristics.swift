@@ -8,6 +8,7 @@ public enum LLMClient: String, Sendable, Codable, CaseIterable, Hashable {
     case claudeCode = "claude-code"
     case codex
     case cursor
+    case copilot
     case unknown
 
     public var displayName: String {
@@ -15,6 +16,7 @@ public enum LLMClient: String, Sendable, Codable, CaseIterable, Hashable {
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
         case .cursor: "Cursor"
+        case .copilot: "Copilot"
         case .unknown: "Unknown"
         }
     }
@@ -34,6 +36,15 @@ public enum LLMUsageHeuristics {
         let lower = raw.lowercased()
         if lower.contains("cursor") { return .cursor }
         if lower.contains("codex") { return .codex }
+        // Copilot CLI's UA is typically "GithubCopilot/<ver>" or
+        // includes "github-copilot". This matcher exists for the
+        // unusual case of a user routing `gh copilot` traffic
+        // through OPENAI_BASE_URL — Copilot's *normal* path bypasses
+        // our proxy entirely (hardcoded GitHub backend), so the
+        // 2.4 CopilotUsageProvider is the actual data source.
+        if lower.contains("copilot") || lower.contains("github-copilot") {
+            return .copilot
+        }
         if lower.contains("claude-cli")
             || lower.contains("claude-code")
             || lower.contains("anthropic") {
