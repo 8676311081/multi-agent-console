@@ -113,12 +113,14 @@ struct LLMSpendStatsView: View {
 
     private var summaryCards: some View {
         let totals = aggregateTotals()
+        let compression = model.llmStatsSnapshot.compressionSummary
         return LazyVGrid(columns: [
-            GridItem(.flexible(), spacing: 12),
-            GridItem(.flexible(), spacing: 12),
-            GridItem(.flexible(), spacing: 12),
-            GridItem(.flexible(), spacing: 12),
-        ], spacing: 12) {
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10),
+        ], spacing: 10) {
             statCard(
                 label: lang.t("settings.llmSpend.stats.cardTokens"),
                 value: formattedTokens(totals.totalTokens)
@@ -140,6 +142,19 @@ struct LLMSpendStatsView: View {
             statCard(
                 label: lang.t("settings.llmSpend.stats.cardMessages"),
                 value: "\(totals.totalTurns)"
+            )
+            // RTK compression is cross-agent + cross-day so it ignores
+            // the time-range picker — the value is always the all-time
+            // cumulative `total_saved` from rtk gain. nil → "—" with
+            // explanatory tooltip; UI never invents a per-range
+            // attribution we don't have.
+            statCard(
+                label: lang.t("settings.llmSpend.stats.cardSavedByCompression"),
+                value: compression.map { formattedTokens($0.totalSavedTokens) } ?? "—",
+                emphasis: compression == nil ? .secondary : nil,
+                tooltip: compression == nil
+                    ? lang.t("settings.llmSpend.stats.savedByCompressionUnavailable")
+                    : lang.t("settings.llmSpend.stats.savedByCompressionTooltip")
             )
         }
     }

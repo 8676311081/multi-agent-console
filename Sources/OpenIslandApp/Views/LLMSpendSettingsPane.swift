@@ -11,6 +11,7 @@ struct LLMSpendSettingsPane: View {
     @State private var upstreamErrorKey: String?
     @State private var copiedKey: String?
     @State private var showStatsSheet: Bool = false
+    @State private var showRTKConfirmSheet: Bool = false
 
     private var lang: LanguageManager { model.lang }
 
@@ -36,17 +37,28 @@ struct LLMSpendSettingsPane: View {
                 }
                 controlsSection
                 upstreamsSection
+                compressionSection
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(lang.t("settings.tab.llmSpend"))
-        .onAppear { syncFields() }
+        .onAppear {
+            syncFields()
+            // Pull current RTK status fresh whenever the user lands on
+            // this pane — handles the "user manually deleted the
+            // binary outside the app" case without waiting for the
+            // 30 s watchdog tick.
+            model.hooks.refreshRtkStatus()
+        }
         .onChange(of: model.llmProxyPort) { _, _ in syncFields() }
         .onChange(of: model.llmProxyOpenAIUpstream) { _, _ in syncFields() }
         .onChange(of: model.llmProxyAnthropicUpstream) { _, _ in syncFields() }
         .sheet(isPresented: $showStatsSheet) {
             LLMSpendStatsView(model: model)
+        }
+        .sheet(isPresented: $showRTKConfirmSheet) {
+            rtkConfirmSheet
         }
     }
 
@@ -457,6 +469,148 @@ struct LLMSpendSettingsPane: View {
         portFieldText = String(model.llmProxyPort)
         openAIUpstreamText = model.llmProxyOpenAIUpstream.absoluteString
         anthropicUpstreamText = model.llmProxyAnthropicUpstream.absoluteString
+    }
+
+    // MARK: - Compression (RTK)
+
+    private var compressionSection: some View {
+        let status = model.hooks.rtkStatus
+        let busy = model.hooks.isRtkSetupBusy
+        return VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(lang.t("settings.llmSpend.compression.title"))
+                    .font(.headline)
+                Text(lang.t("settings.llmSpend.compression.subtitle"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            compressionStatusRow(status: status, busy: busy)
+            if status?.state == .installedEnabled,
+               let summary = model.llmStatsSnapshot.compressionSummary,
+               summary.totalCommands > 0 {
+                compressionStatsRow(summary)
+            }
+        }
+    }
+
+    private func compressionStatusRow(status: RTKInstallationStatus?, busy: Bool) -> some View {
+        HStack(spacing: 12) {
+            compressionStatusBadge(status: status)
+            Spacer()
+            compressionButtons(status: status, busy: busy)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func compressionStatusBadge(status: RTKInstallationStatus?) -> some View {
+        let (label, color): (String, Color)
+        switch status?.state {
+        case .none, .notInstalled:
+            (label, color) = (lang.t("settings.llmSpend.compression.statusNotInstalled"), .secondary)
+        case .installedDisabled:
+            (label, color) = (lang.t("settings.llmSpend.compression.statusInstalledDisabled"), .orange)
+        case .installedEnabled:
+            (label, color) = (lang.t("settings.llmSpend.compression.statusEnabled"), .green)
+        case .needsRepair:
+            (label, color) = (lang.t("settings.llmSpend.compression.statusNeedsRepair"), .orange)
+        case .unsupportedArchitecture:
+            (label, color) = (lang.t("settings.llmSpend.compression.intelMacUnsupported"), .secondary)
+        }
+        return HStack(spacing: 8) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(label)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func compressionButtons(status: RTKInstallationStatus?, busy: Bool) -> some View {
+        let state = status?.state ?? .notInstalled
+        switch state {
+        case .unsupportedArchitecture:
+            // Intel: there's nothing the user can do. Don't render
+            // ghost buttons that look interactive.
+            EmptyView()
+        case .notInstalled:
+            Button(busy
+                   ? lang.t("settings.llmSpend.compression.installingButton")
+                   : lang.t("settings.llmSpend.compression.installButton")) {
+                showRTKConfirmSheet = true
+            }
+            .disabled(busy)
+        case .installedDisabled, .needsRepair:
+            HStack(spacing: 8) {
+                Button(state == .needsRepair
+                       ? lang.t("settings.llmSpend.compression.repairButton")
+                       : lang.t("settings.llmSpend.compression.installButton")) {
+                    showRTKConfirmSheet = true
+                }
+                .disabled(busy)
+                Button(busy
+                       ? lang.t("settings.llmSpend.compression.uninstallingButton")
+                       : lang.t("settings.llmSpend.compression.uninstallButton"),
+                       role: .destructive) {
+                    model.hooks.uninstallRtk()
+                }
+                .disabled(busy)
+            }
+        case .installedEnabled:
+            Button(busy
+                   ? lang.t("settings.llmSpend.compression.uninstallingButton")
+                   : lang.t("settings.llmSpend.compression.uninstallButton"),
+                   role: .destructive) {
+                model.hooks.uninstallRtk()
+            }
+            .disabled(busy)
+        }
+    }
+
+    private func compressionStatsRow(_ summary: CompressionSummary) -> some View {
+        // RTK gain reports cumulative summary — never per-day or
+        // per-client. Surface it as "all time" rather than fake a
+        // 7-day window we don't have data for.
+        HStack(spacing: 8) {
+            Image(systemName: "chart.bar.doc.horizontal")
+                .foregroundStyle(.secondary)
+            Text(String(
+                format: lang.t("settings.llmSpend.compression.statsAllTime"),
+                "\(summary.totalCommands)",
+                String(format: "%.1f", summary.avgSavingsPct)
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var rtkConfirmSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(lang.t("settings.llmSpend.compression.confirmSheetTitle"))
+                .font(.title3.weight(.semibold))
+            Text(String(
+                format: lang.t("settings.llmSpend.compression.confirmSheetBody"),
+                RTKInstallationManager.RTK_VERSION
+            ))
+            .font(.callout)
+            .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button(lang.t("settings.llmSpend.compression.confirmSheetCancel")) {
+                    showRTKConfirmSheet = false
+                }
+                Button(lang.t("settings.llmSpend.compression.confirmSheetConfirm")) {
+                    showRTKConfirmSheet = false
+                    Task { await model.hooks.installRtk() }
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 480)
     }
 }
 
