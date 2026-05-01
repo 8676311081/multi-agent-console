@@ -29,6 +29,13 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
     /// (we don't know how to price this model — table needs updating).
     public var unpricedTurns: Int
     public var duplicateToolCalls: Int
+    /// Sum of estimated tokens for tools the model declared in
+    /// `tools[]` but never invoked during the turn. Estimated from
+    /// `LLMRequestAnalyzer` + `LLMTokenEstimator` — approximate, used
+    /// only for visibility ("you carried 3000 tokens of schema for
+    /// nothing"). Optional on decode → defaults to 0 for legacy
+    /// buckets.
+    public var unusedToolTokensWasted: Int
     public var lastWarning: LLMDuplicateWarning?
     public var lastUpdatedAt: Date?
 
@@ -42,6 +49,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         costUsd: Double = 0,
         unpricedTurns: Int = 0,
         duplicateToolCalls: Int = 0,
+        unusedToolTokensWasted: Int = 0,
         lastWarning: LLMDuplicateWarning? = nil,
         lastUpdatedAt: Date? = nil
     ) {
@@ -54,6 +62,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         self.costUsd = costUsd
         self.unpricedTurns = unpricedTurns
         self.duplicateToolCalls = duplicateToolCalls
+        self.unusedToolTokensWasted = unusedToolTokensWasted
         self.lastWarning = lastWarning
         self.lastUpdatedAt = lastUpdatedAt
     }
@@ -62,7 +71,9 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         case turns, tokensIn, tokensOut
         case inputTokens, cacheReadTokens, cacheCreationTokens
         case costUsd, unpricedTurns
-        case duplicateToolCalls, lastWarning, lastUpdatedAt
+        case duplicateToolCalls
+        case unusedToolTokensWasted
+        case lastWarning, lastUpdatedAt
     }
 
     public init(from decoder: any Decoder) throws {
@@ -76,6 +87,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         costUsd = try c.decodeIfPresent(Double.self, forKey: .costUsd) ?? 0
         unpricedTurns = try c.decodeIfPresent(Int.self, forKey: .unpricedTurns) ?? 0
         duplicateToolCalls = try c.decodeIfPresent(Int.self, forKey: .duplicateToolCalls) ?? 0
+        unusedToolTokensWasted = try c.decodeIfPresent(Int.self, forKey: .unusedToolTokensWasted) ?? 0
         lastWarning = try c.decodeIfPresent(LLMDuplicateWarning.self, forKey: .lastWarning)
         lastUpdatedAt = try c.decodeIfPresent(Date.self, forKey: .lastUpdatedAt)
     }
@@ -243,7 +255,8 @@ public actor LLMStatsStore {
         date: Date = Date(),
         client: LLMClient,
         usage: TokenUsage,
-        costUsd: Double?
+        costUsd: Double?,
+        unusedToolTokensWasted: Int = 0
     ) {
         let key = Self.dayKey(for: date)
         var dayBuckets = snapshot.days[key] ?? [:]
@@ -254,6 +267,7 @@ public actor LLMStatsStore {
         bucket.cacheReadTokens += usage.cacheRead
         bucket.cacheCreationTokens += usage.cacheWrite
         bucket.tokensOut += usage.output
+        bucket.unusedToolTokensWasted += unusedToolTokensWasted
         if let costUsd {
             bucket.costUsd += costUsd
         } else {

@@ -277,13 +277,15 @@ struct LLMSpendStatsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 28)
             Text(lang.t("settings.llmSpend.stats.colTurns"))
-                .frame(width: 80, alignment: .trailing)
+                .frame(width: 70, alignment: .trailing)
             Text(lang.t("settings.llmSpend.stats.colTokens"))
-                .frame(width: 100, alignment: .trailing)
+                .frame(width: 90, alignment: .trailing)
             Text(lang.t("settings.llmSpend.stats.colCost"))
-                .frame(width: 90, alignment: .trailing)
+                .frame(width: 80, alignment: .trailing)
             Text(lang.t("settings.llmSpend.stats.colCacheHit"))
-                .frame(width: 90, alignment: .trailing)
+                .frame(width: 80, alignment: .trailing)
+            Text(lang.t("settings.llmSpend.stats.colWasted"))
+                .frame(width: 80, alignment: .trailing)
                 .padding(.trailing, 14)
         }
         .font(.caption2.weight(.semibold))
@@ -306,14 +308,14 @@ struct LLMSpendStatsView: View {
 
             Text("\(entry.turns)")
                 .font(.subheadline.monospacedDigit())
-                .frame(width: 80, alignment: .trailing)
+                .frame(width: 70, alignment: .trailing)
             Text(formattedTokens(entry.totalTokens))
                 .font(.subheadline.monospacedDigit())
-                .frame(width: 100, alignment: .trailing)
+                .frame(width: 90, alignment: .trailing)
             Text(entry.costDisplay)
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(entry.hasUnpriced ? Color.orange : Color.primary)
-                .frame(width: 90, alignment: .trailing)
+                .frame(width: 80, alignment: .trailing)
                 .help(entry.hasUnpriced ? lang.t("settings.llmSpend.unpricedTooltip") : "")
             Text(entry.cacheHitDisplay)
                 .font(.subheadline.monospacedDigit())
@@ -321,7 +323,16 @@ struct LLMSpendStatsView: View {
                 .help(entry.cacheHitRatio == nil
                       ? lang.t("settings.llmSpend.stats.cacheHitLegacyTooltip")
                       : "")
-                .frame(width: 90, alignment: .trailing)
+                .frame(width: 80, alignment: .trailing)
+            Text(entry.unusedToolTokensWasted == 0
+                 ? "—"
+                 : formattedTokens(entry.unusedToolTokensWasted))
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(entry.unusedToolTokensWasted == 0
+                                 ? Color.secondary
+                                 : Color.orange)
+                .help(lang.t("settings.llmSpend.stats.wastedTooltip"))
+                .frame(width: 80, alignment: .trailing)
                 .padding(.trailing, 14)
         }
         .padding(.vertical, 10)
@@ -375,6 +386,10 @@ struct LLMSpendStatsView: View {
         var cost: Double
         var cacheHitRatio: Double?
         var unpricedTurns: Int
+        /// Sum of `LLMDayBucket.unusedToolTokensWasted` over the
+        /// selected range — tokens this client paid to ship as
+        /// schemas the model never invoked.
+        var unusedToolTokensWasted: Int
 
         var hasUnpriced: Bool { unpricedTurns > 0 }
 
@@ -454,17 +469,18 @@ struct LLMSpendStatsView: View {
     private func clientBreakdown() -> [ClientEntry] {
         let order: [LLMClient] = [.claudeCode, .codex, .cursor, .unknown]
         var bucketsByClient: [LLMClient: [LLMDayBucket]] = [:]
-        var aggregateByClient: [LLMClient: (turns: Int, tokens: Int, cost: Double, unpriced: Int)] = [:]
+        var aggregateByClient: [LLMClient: (turns: Int, tokens: Int, cost: Double, unpriced: Int, wasted: Int)] = [:]
 
         for entry in rangeData {
             for (rawClient, bucket) in entry.buckets where bucket.turns > 0 {
                 let client = LLMClient(rawValue: rawClient) ?? .unknown
                 bucketsByClient[client, default: []].append(bucket)
-                var sums = aggregateByClient[client] ?? (0, 0, 0, 0)
+                var sums = aggregateByClient[client] ?? (0, 0, 0, 0, 0)
                 sums.turns += bucket.turns
                 sums.tokens += bucket.tokensIn + bucket.tokensOut
                 sums.cost += bucket.costUsd
                 sums.unpriced += bucket.unpricedTurns
+                sums.wasted += bucket.unusedToolTokensWasted
                 aggregateByClient[client] = sums
             }
         }
@@ -477,7 +493,8 @@ struct LLMSpendStatsView: View {
                 totalTokens: sums.tokens,
                 cost: sums.cost,
                 cacheHitRatio: ratio,
-                unpricedTurns: sums.unpriced
+                unpricedTurns: sums.unpriced,
+                unusedToolTokensWasted: sums.wasted
             )
         }
     }

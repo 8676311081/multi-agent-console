@@ -23,11 +23,14 @@ public actor LLMUsageObserver: LLMProxyObserver {
     public func proxyWillForward(_ context: LLMProxyRequestContext) async {
         let client = LLMUsageHeuristics.clientFromUserAgent(context.userAgent)
         let model = LLMRequestParsing.extractModel(from: context.requestBody)
+        // Read-only — `LLMRequestAnalyzer` never mutates the body.
+        let declared = LLMRequestAnalyzer.analyzeDeclaredTools(in: context.requestBody)
         inFlight[context.id] = RequestState(
             client: client,
             model: model,
             upstream: context.upstream,
-            path: context.path
+            path: context.path,
+            declaredTools: declared
         )
     }
 
@@ -98,12 +101,22 @@ public actor LLMUsageObserver: LLMProxyObserver {
         }
 
         let cost = LLMPricing.costUSD(model: state.model, usage: usage)
+        // Compute waste: tools the model declared but never invoked
+        // during the turn. Sum the per-tool estimate from the
+        // analyzer pass at proxyWillForward time. Used names from
+        // toolUses; declared from state.declaredTools.
+        let usedNames = Set(toolUses.map(\.name))
+        let unused = state.declaredTools.toolNames.subtracting(usedNames)
+        let unusedTokensWasted = unused.reduce(0) { acc, name in
+            acc + (state.declaredTools.estimatedTokensPerTool[name] ?? 0)
+        }
         if usage != .zero || !toolUses.isEmpty {
             await store.recordRequestCompletion(
                 date: context.receivedAt,
                 client: state.client,
                 usage: usage,
-                costUsd: cost
+                costUsd: cost,
+                unusedToolTokensWasted: unusedTokensWasted
             )
         }
         for (name, hash) in toolUses {
@@ -174,6 +187,7 @@ public actor LLMUsageObserver: LLMProxyObserver {
         let model: String?
         let upstream: LLMUpstream
         let path: String
+        let declaredTools: LLMRequestAnalyzer.Declaration
         var httpStatus: Int = 0
         var isSSE: Bool = false
         var sseSplitter = SSEEventSplitter()
