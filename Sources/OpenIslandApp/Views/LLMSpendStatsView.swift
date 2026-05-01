@@ -131,7 +131,11 @@ struct LLMSpendStatsView: View {
             )
             statCard(
                 label: lang.t("settings.llmSpend.stats.cardCacheHit"),
-                value: totals.cacheHitDisplay
+                value: totals.cacheHitDisplay,
+                emphasis: totals.cacheHitRatio == nil ? .secondary : nil,
+                tooltip: totals.cacheHitRatio == nil
+                    ? lang.t("settings.llmSpend.stats.cacheHitLegacyTooltip")
+                    : nil
             )
             statCard(
                 label: lang.t("settings.llmSpend.stats.cardMessages"),
@@ -298,6 +302,10 @@ struct LLMSpendStatsView: View {
                 .help(entry.hasUnpriced ? lang.t("settings.llmSpend.unpricedTooltip") : "")
             Text(entry.cacheHitDisplay)
                 .font(.subheadline.monospacedDigit())
+                .foregroundStyle(entry.cacheHitRatio == nil ? Color.secondary : Color.primary)
+                .help(entry.cacheHitRatio == nil
+                      ? lang.t("settings.llmSpend.stats.cacheHitLegacyTooltip")
+                      : "")
                 .frame(width: 90, alignment: .trailing)
                 .padding(.trailing, 14)
         }
@@ -326,9 +334,9 @@ struct LLMSpendStatsView: View {
         var totalTokens: Int = 0
         var totalCost: Double = 0
         var totalTurns: Int = 0
-        var cacheRead: Int = 0
-        var cacheCreation: Int = 0
-        var input: Int = 0
+        /// `nil` when no bucket in range recorded a cache breakdown
+        /// (legacy snapshots only) — render as "—" not "0%".
+        var cacheHitRatio: Double? = nil
         var anyUnpriced: Bool = false
         var allUnpriced: Bool = true
         var anyTurns: Bool = false
@@ -342,15 +350,7 @@ struct LLMSpendStatsView: View {
             return prefix + LLMSpendFormatting.formatCost(totalCost)
         }
 
-        /// Cache hit ratio = cache_read / (cache_read + cache_creation + input).
-        /// Note `tokensIn` already equals that denominator (sum of the three),
-        /// but we keep the explicit form so the math reads as the spec.
-        var cacheHitDisplay: String {
-            let denom = cacheRead + cacheCreation + input
-            guard denom > 0 else { return "0%" }
-            let pct = Double(cacheRead) / Double(denom) * 100
-            return "\(Int(pct.rounded()))%"
-        }
+        var cacheHitDisplay: String { LLMSpendStatsView.formatRatio(cacheHitRatio) }
     }
 
     private struct ClientEntry {
@@ -358,9 +358,7 @@ struct LLMSpendStatsView: View {
         var turns: Int
         var totalTokens: Int
         var cost: Double
-        var cacheRead: Int
-        var cacheCreation: Int
-        var input: Int
+        var cacheHitRatio: Double?
         var unpricedTurns: Int
 
         var hasUnpriced: Bool { unpricedTurns > 0 }
@@ -371,12 +369,17 @@ struct LLMSpendStatsView: View {
             return prefix + LLMSpendFormatting.formatCost(cost)
         }
 
-        var cacheHitDisplay: String {
-            let denom = cacheRead + cacheCreation + input
-            guard denom > 0 else { return "0%" }
-            let pct = Double(cacheRead) / Double(denom) * 100
-            return "\(Int(pct.rounded()))%"
-        }
+        var cacheHitDisplay: String { LLMSpendStatsView.formatRatio(cacheHitRatio) }
+    }
+
+    /// Renders a `Double?` cache-hit ratio. `nil` → "—" (legacy/unknown);
+    /// otherwise an integer percentage. Centralized so both the summary
+    /// card and per-source rows agree on the legacy-vs-zero distinction.
+    /// `nonisolated` because it's called from the inner `Totals` /
+    /// `ClientEntry` structs, which aren't main-actor.
+    nonisolated static func formatRatio(_ ratio: Double?) -> String {
+        guard let ratio else { return "—" }
+        return "\(Int((ratio * 100).rounded()))%"
     }
 
     private struct DailyCostPoint: Identifiable {
@@ -416,44 +419,52 @@ struct LLMSpendStatsView: View {
 
     private func aggregateTotals() -> Totals {
         var t = Totals()
+        var bucketsForRatio: [LLMDayBucket] = []
         for entry in rangeData {
             for bucket in entry.buckets.values where bucket.turns > 0 {
                 t.anyTurns = true
                 t.totalTurns += bucket.turns
                 t.totalTokens += bucket.tokensIn + bucket.tokensOut
                 t.totalCost += bucket.costUsd
-                t.cacheRead += bucket.cacheReadTokens
-                t.cacheCreation += bucket.cacheCreationTokens
-                t.input += max(0, bucket.tokensIn - bucket.cacheReadTokens - bucket.cacheCreationTokens)
                 if bucket.unpricedTurns > 0 { t.anyUnpriced = true }
                 if bucket.unpricedTurns < bucket.turns { t.allUnpriced = false }
+                bucketsForRatio.append(bucket)
             }
         }
         if !t.anyTurns { t.allUnpriced = false }
+        t.cacheHitRatio = LLMCacheHitAggregator.ratio(of: bucketsForRatio)
         return t
     }
 
     private func clientBreakdown() -> [ClientEntry] {
         let order: [LLMClient] = [.claudeCode, .codex, .cursor, .unknown]
-        var byClient: [LLMClient: ClientEntry] = [:]
+        var bucketsByClient: [LLMClient: [LLMDayBucket]] = [:]
+        var aggregateByClient: [LLMClient: (turns: Int, tokens: Int, cost: Double, unpriced: Int)] = [:]
+
         for entry in rangeData {
             for (rawClient, bucket) in entry.buckets where bucket.turns > 0 {
                 let client = LLMClient(rawValue: rawClient) ?? .unknown
-                var existing = byClient[client] ?? ClientEntry(
-                    client: client, turns: 0, totalTokens: 0, cost: 0,
-                    cacheRead: 0, cacheCreation: 0, input: 0, unpricedTurns: 0
-                )
-                existing.turns += bucket.turns
-                existing.totalTokens += bucket.tokensIn + bucket.tokensOut
-                existing.cost += bucket.costUsd
-                existing.cacheRead += bucket.cacheReadTokens
-                existing.cacheCreation += bucket.cacheCreationTokens
-                existing.input += max(0, bucket.tokensIn - bucket.cacheReadTokens - bucket.cacheCreationTokens)
-                existing.unpricedTurns += bucket.unpricedTurns
-                byClient[client] = existing
+                bucketsByClient[client, default: []].append(bucket)
+                var sums = aggregateByClient[client] ?? (0, 0, 0, 0)
+                sums.turns += bucket.turns
+                sums.tokens += bucket.tokensIn + bucket.tokensOut
+                sums.cost += bucket.costUsd
+                sums.unpriced += bucket.unpricedTurns
+                aggregateByClient[client] = sums
             }
         }
-        return order.compactMap { byClient[$0] }
+        return order.compactMap { client in
+            guard let sums = aggregateByClient[client] else { return nil }
+            let ratio = LLMCacheHitAggregator.ratio(of: bucketsByClient[client] ?? [])
+            return ClientEntry(
+                client: client,
+                turns: sums.turns,
+                totalTokens: sums.tokens,
+                cost: sums.cost,
+                cacheHitRatio: ratio,
+                unpricedTurns: sums.unpriced
+            )
+        }
     }
 
     private func dailyCostSeries() -> [DailyCostPoint] {

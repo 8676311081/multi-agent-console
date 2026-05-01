@@ -276,4 +276,5 @@
 "settings.llmSpend.stats.empty" = "暂无流量 — 设置 ANTHROPIC_BASE_URL 即可开始统计。";
 "settings.llmSpend.stats.todayShort" = "今日";
 "settings.llmSpend.stats.axisDay" = "日期";
+"settings.llmSpend.stats.cacheHitLegacyTooltip" = "2026 年 5 月 1 日之前的流量未记录缓存分解，无法计算命中率。";
 "common.close" = "关闭";

@@ -8,13 +8,19 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
     public var turns: Int
     public var tokensIn: Int
     public var tokensOut: Int
+    /// Subset of `tokensIn` that was uncached prompt input (Anthropic
+    /// `input_tokens` / OpenAI `prompt_tokens` minus cached). Stored
+    /// explicitly so cache-hit math can distinguish a fresh bucket
+    /// with no caches yet (`inputTokens == tokensIn > 0`, hit ratio
+    /// = 0%) from a legacy bucket where the breakdown was never
+    /// recorded (all three breakdown fields == 0 yet `tokensIn > 0`,
+    /// hit ratio = nil → "—").
+    public var inputTokens: Int
     /// Subset of `tokensIn` that came from cache reads (Anthropic
-    /// `cache_read_input_tokens` / OpenAI `cached_tokens`). Lets the UI
-    /// compute cache hit ratios. Older snapshots default to 0; cache hit
-    /// percentages will simply read 0% until new traffic refills.
+    /// `cache_read_input_tokens` / OpenAI `cached_tokens`).
     public var cacheReadTokens: Int
     /// Subset of `tokensIn` that came from cache writes / creation
-    /// (Anthropic `cache_creation_input_tokens`). Same backfill story.
+    /// (Anthropic `cache_creation_input_tokens`).
     public var cacheCreationTokens: Int
     public var costUsd: Double
     /// Turns whose model wasn't in the pricing table. Tokens are still
@@ -30,6 +36,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         turns: Int = 0,
         tokensIn: Int = 0,
         tokensOut: Int = 0,
+        inputTokens: Int = 0,
         cacheReadTokens: Int = 0,
         cacheCreationTokens: Int = 0,
         costUsd: Double = 0,
@@ -41,6 +48,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         self.turns = turns
         self.tokensIn = tokensIn
         self.tokensOut = tokensOut
+        self.inputTokens = inputTokens
         self.cacheReadTokens = cacheReadTokens
         self.cacheCreationTokens = cacheCreationTokens
         self.costUsd = costUsd
@@ -51,7 +59,8 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case turns, tokensIn, tokensOut, cacheReadTokens, cacheCreationTokens
+        case turns, tokensIn, tokensOut
+        case inputTokens, cacheReadTokens, cacheCreationTokens
         case costUsd, unpricedTurns
         case duplicateToolCalls, lastWarning, lastUpdatedAt
     }
@@ -61,6 +70,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         turns = try c.decodeIfPresent(Int.self, forKey: .turns) ?? 0
         tokensIn = try c.decodeIfPresent(Int.self, forKey: .tokensIn) ?? 0
         tokensOut = try c.decodeIfPresent(Int.self, forKey: .tokensOut) ?? 0
+        inputTokens = try c.decodeIfPresent(Int.self, forKey: .inputTokens) ?? 0
         cacheReadTokens = try c.decodeIfPresent(Int.self, forKey: .cacheReadTokens) ?? 0
         cacheCreationTokens = try c.decodeIfPresent(Int.self, forKey: .cacheCreationTokens) ?? 0
         costUsd = try c.decodeIfPresent(Double.self, forKey: .costUsd) ?? 0
@@ -68,6 +78,50 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         duplicateToolCalls = try c.decodeIfPresent(Int.self, forKey: .duplicateToolCalls) ?? 0
         lastWarning = try c.decodeIfPresent(LLMDuplicateWarning.self, forKey: .lastWarning)
         lastUpdatedAt = try c.decodeIfPresent(Date.self, forKey: .lastUpdatedAt)
+    }
+}
+
+public extension LLMDayBucket {
+    /// Cache-hit ratio in `[0, 1]`, or `nil` if no breakdown is
+    /// recorded for this bucket. Returns `nil` when
+    /// `inputTokens + cacheReadTokens + cacheCreationTokens == 0`,
+    /// which covers two cases:
+    ///
+    ///   1. **Legacy bucket** — written before the breakdown fields
+    ///      existed. `tokensIn > 0` but no component is populated;
+    ///      the breakdown is unrecoverable.
+    ///   2. **Empty bucket** — no traffic at all. UI normally
+    ///      filters these before calling, but `nil` is the honest
+    ///      answer either way.
+    ///
+    /// UI must render `nil` as `—` rather than `0%`, since `0%` is a
+    /// real and very different signal (lots of traffic, none cached).
+    var cacheHitRatio: Double? {
+        let denom = inputTokens + cacheReadTokens + cacheCreationTokens
+        guard denom > 0 else { return nil }
+        return Double(cacheReadTokens) / Double(denom)
+    }
+}
+
+/// Cache-hit aggregation across multiple buckets. Sums the breakdown
+/// components and applies the same nil-on-zero-denominator rule —
+/// so a range that contains *only* legacy buckets returns `nil`,
+/// while a mixed range returns the ratio over the buckets that
+/// recorded a breakdown.
+public enum LLMCacheHitAggregator {
+    public static func ratio<S: Sequence>(of buckets: S) -> Double?
+    where S.Element == LLMDayBucket {
+        var input = 0
+        var cacheRead = 0
+        var cacheCreation = 0
+        for b in buckets {
+            input += b.inputTokens
+            cacheRead += b.cacheReadTokens
+            cacheCreation += b.cacheCreationTokens
+        }
+        let denom = input + cacheRead + cacheCreation
+        guard denom > 0 else { return nil }
+        return Double(cacheRead) / Double(denom)
     }
 }
 
@@ -140,6 +194,7 @@ public actor LLMStatsStore {
         var bucket = dayBuckets[client.rawValue] ?? LLMDayBucket()
         bucket.turns += 1
         bucket.tokensIn += usage.input + usage.cacheWrite + usage.cacheRead
+        bucket.inputTokens += usage.input
         bucket.cacheReadTokens += usage.cacheRead
         bucket.cacheCreationTokens += usage.cacheWrite
         bucket.tokensOut += usage.output

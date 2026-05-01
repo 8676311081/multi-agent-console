@@ -276,4 +276,5 @@
 "settings.llmSpend.stats.empty" = "No traffic yet — set ANTHROPIC_BASE_URL to start tracking.";
 "settings.llmSpend.stats.todayShort" = "Today";
 "settings.llmSpend.stats.axisDay" = "Day";
+"settings.llmSpend.stats.cacheHitLegacyTooltip" = "Cache breakdown unavailable for traffic recorded before May 1, 2026.";
 "common.close" = "Close";

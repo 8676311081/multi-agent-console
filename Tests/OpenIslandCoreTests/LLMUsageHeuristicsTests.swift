@@ -278,14 +278,22 @@ struct LLMStatsStoreTests {
         let snap = await store.currentSnapshot()
         let bucket = snap.days.values.first?[LLMClient.claudeCode.rawValue]
         #expect(bucket?.tokensIn == 1000)
+        #expect(bucket?.inputTokens == 200)
         #expect(bucket?.cacheReadTokens == 700)
         #expect(bucket?.cacheCreationTokens == 100)
+        // Sanity check: the three breakdown components should sum to tokensIn.
+        #expect(
+            (bucket?.inputTokens ?? 0)
+            + (bucket?.cacheReadTokens ?? 0)
+            + (bucket?.cacheCreationTokens ?? 0) == bucket?.tokensIn
+        )
     }
 
     @Test
     func legacySnapshotWithoutCacheFieldsDecodesAsZero() throws {
-        // Simulates a snapshot file written before cacheReadTokens /
-        // cacheCreationTokens existed: missing keys must default to 0.
+        // Simulates a snapshot file written before inputTokens /
+        // cacheReadTokens / cacheCreationTokens existed: missing keys
+        // must default to 0 so old data still loads.
         let json = """
         {
           "version": 1,
@@ -309,8 +317,72 @@ struct LLMStatsStoreTests {
         let bucket = snap.days["2026-01-01"]?[LLMClient.claudeCode.rawValue]
         #expect(bucket?.turns == 5)
         #expect(bucket?.tokensIn == 1000)
+        #expect(bucket?.inputTokens == 0)
         #expect(bucket?.cacheReadTokens == 0)
         #expect(bucket?.cacheCreationTokens == 0)
+    }
+
+    // MARK: - Cache hit ratio
+
+    @Test
+    func cacheHitRatioIsNilForLegacyBucket() {
+        // Pre-breakdown bucket: tokensIn > 0 but no component recorded.
+        // Distinguishing this from a "fresh, never cached" bucket is
+        // exactly why inputTokens exists — without it, we'd misreport
+        // legacy traffic as 0% cache hit.
+        let legacy = LLMDayBucket(
+            turns: 5, tokensIn: 1000, tokensOut: 200, costUsd: 0.5
+        )
+        #expect(legacy.cacheHitRatio == nil)
+    }
+
+    @Test
+    func cacheHitRatioIsZeroForFreshUncachedBucket() {
+        // New-style bucket where every input token was uncached.
+        // This must read 0% (a real signal: caching is off / first turn),
+        // not nil (legacy/unknown).
+        let fresh = LLMDayBucket(
+            turns: 1, tokensIn: 1000, tokensOut: 100,
+            inputTokens: 1000, cacheReadTokens: 0, cacheCreationTokens: 0
+        )
+        #expect(fresh.cacheHitRatio == 0.0)
+    }
+
+    @Test
+    func cacheHitRatioMatchesSpecFormula() {
+        // 200 uncached + 100 created + 700 read => hit ratio
+        // = 700 / 1000 = 0.70.
+        let mixed = LLMDayBucket(
+            turns: 1, tokensIn: 1000, tokensOut: 50,
+            inputTokens: 200, cacheReadTokens: 700, cacheCreationTokens: 100
+        )
+        #expect(mixed.cacheHitRatio == 0.7)
+    }
+
+    @Test
+    func aggregatorReturnsNilWhenAllBucketsAreLegacy() {
+        let legacyA = LLMDayBucket(turns: 3, tokensIn: 500, tokensOut: 100)
+        let legacyB = LLMDayBucket(turns: 2, tokensIn: 300, tokensOut: 50)
+        #expect(LLMCacheHitAggregator.ratio(of: [legacyA, legacyB]) == nil)
+    }
+
+    @Test
+    func aggregatorIgnoresLegacyBucketsInMixedRange() {
+        // A range that contains both legacy and breakdown-bearing
+        // buckets reports the ratio over the buckets we *can* break
+        // down, rather than misleadingly saying "—" or "0%".
+        let legacy = LLMDayBucket(turns: 5, tokensIn: 1000, tokensOut: 200)
+        let fresh = LLMDayBucket(
+            turns: 1, tokensIn: 400, tokensOut: 50,
+            inputTokens: 100, cacheReadTokens: 300, cacheCreationTokens: 0
+        )
+        let ratio = LLMCacheHitAggregator.ratio(of: [legacy, fresh])
+        #expect(ratio == 0.75)  // 300 / (100 + 300 + 0)
+    }
+
+    @Test
+    func aggregatorReturnsNilForEmptySequence() {
+        #expect(LLMCacheHitAggregator.ratio(of: [LLMDayBucket]()) == nil)
     }
 
     @Test
