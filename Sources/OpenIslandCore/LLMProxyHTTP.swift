@@ -7,10 +7,26 @@ import Foundation
 /// headers on the outbound socket. The proxy never re-encodes the response
 /// body — bytes flow straight through from URLSession to NWConnection.
 ///
-/// We deliberately do NOT impose an upper bound on inbound body size; long
-/// Claude Code prompts run several MB and that is normal traffic.
+/// Inbound body accumulation is capped at `INBOUND_BODY_CAP_BYTES`
+/// (64 MiB). Originally unbounded by design — multi-MB Claude Code
+/// prompts are normal traffic — but commit 1.6 added a soft cap after
+/// review identified DoS surface even on loopback (a buggy local CLI
+/// can pin memory unbounded). Increase the cap by editing the
+/// constant below; do not bypass it. Both the chunked path and the
+/// `Content-Length` accumulation path share the same constant —
+/// adjusting either independently would create silent skew.
+
+/// Hard upper bound on accumulated inbound body bytes per request. A
+/// well-formed request that hits this cap is rejected with `413
+/// Payload Too Large`. A chunked stream whose declared *single chunk
+/// size* exceeds this returns `.malformed` (treated as `400` upstream).
+private let INBOUND_BODY_CAP_BYTES = 64 * 1024 * 1024  // 64 MiB
 
 public enum LLMProxyHTTP {
+    /// Public re-export of the cap so the inbound-server's
+    /// Content-Length path and tests can see the same constant.
+    /// Edit the file-private `INBOUND_BODY_CAP_BYTES` to change it.
+    public static var inboundBodyCapBytes: Int { INBOUND_BODY_CAP_BYTES }
     /// Hop-by-hop headers per RFC 7230 §6.1. These describe the single TCP
     /// hop and must not be forwarded to upstream / downstream peers.
     public static let hopByHopHeaders: Set<String> = [
@@ -115,7 +131,12 @@ public enum LLMProxyHTTP {
     public enum ChunkedResult: Sendable {
         case needMore
         case complete(body: Data, bytesConsumed: Int)
+        /// Decoder rejected the input as malformed (bad hex size,
+        /// missing CRLF after a chunk, etc.). Callers respond `400`.
         case malformed
+        /// Stream is well-formed but accumulated body would exceed
+        /// `INBOUND_BODY_CAP_BYTES`. Callers respond `413`.
+        case tooLarge
     }
 
     public static func decodeChunkedBody(_ data: Data) -> ChunkedResult {
@@ -137,6 +158,14 @@ public enum LLMProxyHTTP {
             guard let size = Int(hex, radix: 16) else {
                 return .malformed
             }
+            // `Int(_:radix:16)` accepts a leading `-` and produces a
+            // negative size, which would feed a negative-stride
+            // `subdata(in:)` and trap. RFC 7230 §4.1 forbids signed
+            // chunk sizes; reject anything below zero. Likewise reject
+            // a single chunk whose declared size already exceeds the
+            // body cap — no need to grow `body` past it.
+            guard size >= 0 else { return .malformed }
+            guard size <= INBOUND_BODY_CAP_BYTES else { return .malformed }
             cursor = lineEnd + 2 // past CRLF after size line
 
             if size == 0 {
@@ -157,6 +186,12 @@ public enum LLMProxyHTTP {
             let needed = cursor + size + 2
             if data.count < needed {
                 return .needMore
+            }
+            // Reject *accumulated* overflow before allocating: a
+            // legitimate-looking sequence of small chunks can still
+            // exceed the cap.
+            if body.count &+ size > INBOUND_BODY_CAP_BYTES {
+                return .tooLarge
             }
             body.append(data.subdata(in: cursor..<(cursor + size)))
             cursor += size

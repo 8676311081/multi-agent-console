@@ -274,6 +274,21 @@ public final class LLMProxyServer: @unchecked Sendable {
             if head.isChunked {
                 switch LLMProxyHTTP.decodeChunkedBody(bodyData) {
                 case .needMore:
+                    // Defensive: if the caller is buffering a slow
+                    // chunked stream, never let `state.buffer` grow
+                    // past the cap. The decoder's own `.tooLarge`
+                    // gate fires once the *decoded* body crosses the
+                    // line; this gate fires earlier on the *raw*
+                    // bytes, in case the stream is mostly chunk
+                    // metadata without ever flushing a full chunk.
+                    if state.buffer.count > LLMProxyHTTP.inboundBodyCapBytes {
+                        self.respondLocally(
+                            state: state,
+                            status: 413,
+                            body: #"{"error":"request body exceeds 64 MiB cap"}"#
+                        )
+                        return
+                    }
                     if isComplete { state.connection.cancel(); return }
                     self.receiveRequest(state: state)
                 case let .complete(body, _):
@@ -284,13 +299,41 @@ public final class LLMProxyServer: @unchecked Sendable {
                         status: 400,
                         body: #"{"error":"malformed chunked body"}"#
                     )
+                case .tooLarge:
+                    self.respondLocally(
+                        state: state,
+                        status: 413,
+                        body: #"{"error":"request body exceeds 64 MiB cap"}"#
+                    )
                 }
             } else {
                 let cl = head.contentLength ?? 0
+                // Reject the request as soon as we know the declared
+                // size is over the cap — no point reading further.
+                if cl > LLMProxyHTTP.inboundBodyCapBytes {
+                    self.respondLocally(
+                        state: state,
+                        status: 413,
+                        body: #"{"error":"request body exceeds 64 MiB cap"}"#
+                    )
+                    return
+                }
                 if bodyData.count >= cl {
                     let body = Data(bodyData.prefix(cl))
                     self.handleParsedRequest(state: state, head: head, body: body)
                 } else {
+                    // Same defensive raw-byte gate the chunked path
+                    // uses: in case `Content-Length` is absent or
+                    // smaller than the actual stream, stop growing
+                    // the buffer past the cap.
+                    if state.buffer.count > LLMProxyHTTP.inboundBodyCapBytes {
+                        self.respondLocally(
+                            state: state,
+                            status: 413,
+                            body: #"{"error":"request body exceeds 64 MiB cap"}"#
+                        )
+                        return
+                    }
                     if isComplete { state.connection.cancel(); return }
                     self.receiveRequest(state: state)
                 }

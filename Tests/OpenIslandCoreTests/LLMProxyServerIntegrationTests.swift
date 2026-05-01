@@ -317,6 +317,141 @@ struct LLMProxyServerIntegrationTests {
         #expect(http2.statusCode == 200)
     }
 
+    // MARK: - 1.6 hardening: 64 MiB inbound body cap
+
+    /// Content-Length declaring a body bigger than the cap → 413,
+    /// no upstream call made. Bypasses URLSession (which would
+    /// otherwise overwrite our intentionally-lying Content-Length
+    /// header) by speaking raw HTTP/1.1 over NWConnection.
+    @Test
+    func contentLengthOverCapReturns413BeforeForwarding() async throws {
+        let (server, store, port, storeURL) = try await Self.makeServer()
+        defer { Self.teardown(server, storeURL) }
+
+        let upstreamReached = UpstreamReachFlag()
+        MockUpstreamProtocol.setResponder { _ in
+            upstreamReached.set()
+            return MockUpstreamProtocol.Response(statusCode: 200, headers: [:], bodyChunks: [Data()])
+        }
+
+        let cap = LLMProxyHTTP.inboundBodyCapBytes
+        // Raw HTTP wire bytes — explicit `\r\n` terminators rather
+        // than multi-line literals, because `"""..."""` strips the
+        // newline immediately before the closing `"""`, so a final
+        // `\r` would land on the wire without its companion `\n`.
+        let raw = "POST /v1/messages HTTP/1.1\r\n"
+            + "Host: 127.0.0.1:\(port)\r\n"
+            + "Content-Type: application/json\r\n"
+            + "Content-Length: \(cap + 1)\r\n"
+            + "\r\n"
+            + "{}"
+        let response = try await Self.sendRawHTTP(port: port, request: Data(raw.utf8))
+        let firstLine = response.split(separator: "\r\n", maxSplits: 1).first.map(String.init) ?? ""
+        #expect(firstLine.contains("413"))
+        #expect(response.contains("64 MiB"))
+        #expect(!upstreamReached.didReach)
+        _ = store
+    }
+
+    /// Speak a single HTTP/1.1 request to 127.0.0.1:`port` over a
+    /// raw NWConnection — bypasses URLSession's automatic
+    /// Content-Length / Accept-Encoding rewriting so we can put
+    /// hostile bytes on the wire and observe the proxy's response
+    /// verbatim.
+    private static func sendRawHTTP(
+        port: UInt16,
+        request: Data,
+        timeout: TimeInterval = 3
+    ) async throws -> String {
+        let conn = NWConnection(
+            host: NWEndpoint.Host("127.0.0.1"),
+            port: NWEndpoint.Port(rawValue: port)!,
+            using: .tcp
+        )
+        let queue = DispatchQueue(label: "test.raw-http")
+        let state = RawHTTPState()
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now() + timeout)
+            timer.setEventHandler {
+                if state.markResponded() {
+                    conn.cancel()
+                    cont.resume(throwing: NSError(domain: "test", code: -10, userInfo: [
+                        NSLocalizedDescriptionKey: "raw HTTP read timeout"
+                    ]))
+                }
+            }
+            conn.stateUpdateHandler = { connState in
+                switch connState {
+                case .ready:
+                    conn.send(content: request, completion: .contentProcessed { _ in })
+                    func readMore() {
+                        conn.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { chunk, _, isComplete, _ in
+                            if let chunk { state.appendBuf(chunk) }
+                            // Status-line latch: once we've got the
+                            // response status line (and ideally the
+                            // whole body, but at minimum enough to
+                            // assert on), return without waiting for
+                            // a final EOF that the server may delay.
+                            // 64 bytes is enough to catch
+                            // `HTTP/1.1 4xx ...` + JSON error body.
+                            let haveResponse = state.bufString.contains("HTTP/1.1 ")
+                                && state.bufString.contains("\r\n\r\n")
+                            if isComplete || haveResponse {
+                                if state.markResponded() {
+                                    timer.cancel()
+                                    conn.cancel()
+                                    cont.resume(returning: state.bufString)
+                                }
+                            } else {
+                                readMore()
+                            }
+                        }
+                    }
+                    readMore()
+                case let .failed(err):
+                    if state.markResponded() {
+                        timer.cancel()
+                        cont.resume(throwing: err)
+                    }
+                default:
+                    break
+                }
+            }
+            timer.resume()
+            conn.start(queue: queue)
+        }
+    }
+
+    /// Same path through chunked: pre-cap chunk size in the wire-
+    /// level decode is rejected as 400 malformed (single chunk is
+    /// pathological at >cap) — verify end-to-end.
+    @Test
+    func chunkedSingleChunkOverCapReturns400() async throws {
+        let (server, store, port, storeURL) = try await Self.makeServer()
+        defer { Self.teardown(server, storeURL) }
+
+        let upstreamReached = UpstreamReachFlag()
+        MockUpstreamProtocol.setResponder { _ in
+            upstreamReached.set()
+            return MockUpstreamProtocol.Response(statusCode: 200, headers: [:], bodyChunks: [Data()])
+        }
+
+        let cap = LLMProxyHTTP.inboundBodyCapBytes
+        let oversizeHex = String(cap + 1, radix: 16)
+        let raw = "POST /v1/messages HTTP/1.1\r\n"
+            + "Host: 127.0.0.1:\(port)\r\n"
+            + "Content-Type: application/json\r\n"
+            + "Transfer-Encoding: chunked\r\n"
+            + "\r\n"
+            + "\(oversizeHex)\r\n"
+        let response = try await Self.sendRawHTTP(port: port, request: Data(raw.utf8))
+        let firstLine = response.split(separator: "\r\n", maxSplits: 1).first.map(String.init) ?? ""
+        #expect(firstLine.contains("400"))
+        #expect(!upstreamReached.didReach)
+        _ = store
+    }
+
     // MARK: - (f) abc09c6 gap: outbound Accept-Encoding forced to identity
 
     @Test
@@ -385,4 +520,42 @@ private final class CapturedHeaders: @unchecked Sendable {
     private var headers: [String: String] = [:]
     func set(_ v: [String: String]) { lock.lock(); headers = v; lock.unlock() }
     var value: [String: String] { lock.lock(); defer { lock.unlock() }; return headers }
+}
+
+/// Tracks whether the mock upstream was ever invoked. Used by the
+/// `contentLengthOverCapReturns413BeforeForwarding` test to verify
+/// the 413 fires *before* any upstream call.
+private final class UpstreamReachFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reached = false
+    func set() { lock.lock(); reached = true; lock.unlock() }
+    var didReach: Bool { lock.lock(); defer { lock.unlock() }; return reached }
+}
+
+/// Lock-protected shared state for `sendRawHTTP`. Holds the
+/// inbound buffer + a `responded` latch so the timer / receive
+/// callbacks running on the same DispatchQueue don't race.
+private final class RawHTTPState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var responded = false
+    private var buf = Data()
+
+    /// Atomic test-and-set: returns `true` exactly once.
+    func markResponded() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if responded { return false }
+        responded = true
+        return true
+    }
+
+    func appendBuf(_ chunk: Data) {
+        lock.lock(); defer { lock.unlock() }
+        buf.append(chunk)
+    }
+
+    var bufCount: Int { lock.lock(); defer { lock.unlock() }; return buf.count }
+    var bufString: String {
+        lock.lock(); defer { lock.unlock() }
+        return String(data: buf, encoding: .utf8) ?? ""
+    }
 }
