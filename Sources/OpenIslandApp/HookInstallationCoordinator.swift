@@ -15,6 +15,7 @@ final class HookInstallationCoordinator {
     var cursorHookStatus: CursorHookInstallationStatus?
     var geminiHookStatus: GeminiHookInstallationStatus?
     var claudeStatusLineStatus: ClaudeStatusLineInstallationStatus?
+    var rtkStatus: RTKInstallationStatus?
     var claudeUsageSnapshot: ClaudeUsageSnapshot?
     var codexUsageSnapshot: CodexUsageSnapshot?
     var hooksBinaryURL: URL?
@@ -28,6 +29,7 @@ final class HookInstallationCoordinator {
     var isCursorHookSetupBusy = false
     var isGeminiHookSetupBusy = false
     var isClaudeUsageSetupBusy = false
+    var isRtkSetupBusy = false
 
     @ObservationIgnored
     var onStatusMessage: ((String) -> Void)?
@@ -77,6 +79,17 @@ final class HookInstallationCoordinator {
     private var claudeStatusLineInstallationManager: ClaudeStatusLineInstallationManager {
         ClaudeStatusLineInstallationManager()
     }
+
+    /// Computed so it always reflects the latest `ClaudeConfigDirectory` setting.
+    private var rtkInstallationManager: RTKInstallationManager {
+        RTKInstallationManager()
+    }
+
+    /// Watchdog is created lazily on `installRtk()` and torn down on
+    /// `uninstallRtk()` / `stopRtkWatchdog()`. Storing it on the
+    /// coordinator (single owner) so app-quit cleanup is straightforward.
+    @ObservationIgnored
+    private var rtkWatchdog: RTKWatchdog?
 
     @ObservationIgnored
     private var claudeUsageMonitorTask: Task<Void, Never>?
@@ -1105,5 +1118,59 @@ final class HookInstallationCoordinator {
         }
 
         return nil
+    }
+
+    // MARK: - RTK (token-compression PreToolUse hook)
+
+    /// Refresh `rtkStatus` from disk. Cheap (no network). Safe to call
+    /// from anywhere; does not start the watchdog.
+    func refreshRtkStatus() {
+        rtkStatus = try? rtkInstallationManager.status()
+    }
+
+    /// Download + install RTK and arm the watchdog. UI sets
+    /// `isRtkSetupBusy` while this runs.
+    func installRtk() async {
+        guard !isRtkSetupBusy else { return }
+        isRtkSetupBusy = true
+        defer { isRtkSetupBusy = false }
+        do {
+            let manager = rtkInstallationManager
+            let status = try await manager.install()
+            rtkStatus = status
+            if status.state == .installedEnabled {
+                let watchdog = RTKWatchdog(manager: manager)
+                watchdog.start()
+                rtkWatchdog = watchdog
+                onStatusMessage?("RTK \(status.rtkVersion) installed.")
+            }
+        } catch {
+            onStatusMessage?("RTK install failed: \(error.localizedDescription)")
+            refreshRtkStatus()
+        }
+    }
+
+    /// Tear down RTK and the watchdog. Idempotent.
+    func uninstallRtk() {
+        guard !isRtkSetupBusy else { return }
+        isRtkSetupBusy = true
+        defer { isRtkSetupBusy = false }
+        rtkWatchdog?.stop()
+        rtkWatchdog = nil
+        do {
+            rtkStatus = try rtkInstallationManager.uninstall()
+            onStatusMessage?("RTK uninstalled.")
+        } catch {
+            onStatusMessage?("RTK uninstall failed: \(error.localizedDescription)")
+            refreshRtkStatus()
+        }
+    }
+
+    /// Called from `applicationWillTerminate` so a clean Cmd+Q leaves
+    /// no ghost background task. Does *not* uninstall — the user's
+    /// hook configuration survives across app restarts.
+    func stopRtkWatchdog() {
+        rtkWatchdog?.stop()
+        rtkWatchdog = nil
     }
 }

@@ -85,6 +85,7 @@ final class OpenIslandAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         model.llmProxy.stop()
+        model.hooks.stopRtkWatchdog()
     }
 
     private static func hideAllAppWindows() {
