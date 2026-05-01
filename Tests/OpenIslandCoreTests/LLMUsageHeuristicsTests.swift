@@ -104,6 +104,22 @@ struct LLMPricingTests {
     }
 
     @Test
+    func gpt55DoesNotSilentlyMatchGpt5() {
+        // Word-boundary prefix match: "gpt-5.5" must NOT resolve to the
+        // "gpt-5" row (next char is '.', not '-'). It surfaces as
+        // unpriced instead, so the table gets updated.
+        #expect(LLMPricing.priceFor(model: "gpt-5.5") == nil)
+        #expect(LLMPricing.costUSD(model: "gpt-5.5", usage: TokenUsage(input: 1_000_000)) == nil)
+    }
+
+    @Test
+    func dateSuffixedModelsStillResolve() {
+        // The boundary fix must not break existing date-suffix matching.
+        #expect(LLMPricing.priceFor(model: "claude-opus-4-7-20260101")?.outputPerMTok == 25.00)
+        #expect(LLMPricing.priceFor(model: "gpt-4o-mini-2025-07-18")?.inputPerMTok == 0.15)
+    }
+
+    @Test
     func unknownModelReturnsNilCost() {
         // Silent zero would hide pricing-table drift — make the caller
         // distinguish "we have no price" from "the math came out to 0".

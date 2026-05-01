@@ -126,13 +126,18 @@ public enum LLMPricing {
     public static func priceFor(model: String?) -> ModelPricing? {
         guard let model, !model.isEmpty else { return nil }
         if let exact = table[model] { return exact }
-        // Longest-prefix match so `claude-sonnet-4-5-20250929` resolves to
-        // the `claude-sonnet-4-5` row instead of `claude-sonnet-4` (which
-        // doesn't exist in the table — but the principle holds for any
-        // future short/long pairs).
+        // Match a row only when the model id is the key followed by a
+        // dash separator — `claude-sonnet-4-5` resolves
+        // `claude-sonnet-4-5-20250929` (date suffix) but does NOT
+        // resolve `gpt-5.5` against `gpt-5`. Bare `hasPrefix` would
+        // silently mis-price new model variants; this surfaces them
+        // as unpriced so the table gets updated.
         let sortedKeys = table.keys.sorted { $0.count > $1.count }
-        for key in sortedKeys where model.hasPrefix(key) {
-            return table[key]
+        for key in sortedKeys {
+            let separator = key + "-"
+            if model.hasPrefix(separator) {
+                return table[key]
+            }
         }
         return nil
     }
