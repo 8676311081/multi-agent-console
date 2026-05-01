@@ -227,3 +227,28 @@
 "settings.autoResponse.action.keyword" = "关键词";
 "settings.autoResponse.save" = "保存";
 "settings.autoResponse.conflict" = "多条规则匹配时，拒绝优先。";
+
+/* Settings - LLM Spend */
+"settings.tab.llmSpend" = "LLM 花费";
+"settings.llmSpend.title" = "LLM 花费";
+"settings.llmSpend.subtitle" = "本地代理在 127.0.0.1 拦截 agent 流量，统计 token 并核算成本。";
+"settings.llmSpend.proxyRunning" = "代理运行中";
+"settings.llmSpend.proxyStopped" = "代理未运行";
+"settings.llmSpend.port" = "端口";
+"settings.llmSpend.todayTotal" = "今日";
+"settings.llmSpend.byClient" = "今日各客户端";
+"settings.llmSpend.client.turns" = "轮次";
+"settings.llmSpend.client.tokens" = "tokens";
+"settings.llmSpend.lastWarning" = "最近一次重复工具调用";
+"settings.llmSpend.lastWarningTemplate" = "%@ 于 %@";
+"settings.llmSpend.controls" = "操作";
+"settings.llmSpend.startProxy" = "启动代理";
+"settings.llmSpend.stopProxy" = "停止代理";
+"settings.llmSpend.applyPort" = "应用";
+"settings.llmSpend.clearToday" = "清空今日";
+"settings.llmSpend.onboardingTitle" = "暂无流量";
+"settings.llmSpend.onboardingBody" = "代理已就绪。导出上面两行环境变量后启动 Claude Code 或 Codex，数据会在这里显示。";
+"settings.llmSpend.copy" = "复制";
+"settings.llmSpend.copied" = "已复制";
+"settings.llmSpend.unpriced" = "—";
+"settings.llmSpend.unpricedTooltip" = "部分轮次使用的模型不在价格表中：tokens 已计入，但金额未知。";

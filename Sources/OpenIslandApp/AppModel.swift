@@ -56,6 +56,20 @@ final class AppModel {
     let updateChecker = UpdateChecker()
     let llmProxy = LLMProxyCoordinator()
 
+    /// Deep-link target for the Settings window. When non-nil, SettingsView
+    /// switches to that tab on appear and clears this back to nil — so it
+    /// doesn't "stick" the next time the user opens Settings manually.
+    var selectedSettingsTab: SettingsTab?
+
+    /// Latest snapshot from the LLM stats store. Refreshed by a poll loop
+    /// (`startLLMStatsRefreshLoop`) at ~1.5 s cadence; the store actor
+    /// itself can be read at any time, this is just the cached value
+    /// that views observe.
+    var llmStatsSnapshot = LLMStatsSnapshot()
+
+    @ObservationIgnored
+    private var llmStatsRefreshTask: Task<Void, Never>?
+
     var notchStatus: NotchStatus {
         get { overlay.notchStatus }
         set { overlay.notchStatus = newValue }
@@ -569,7 +583,56 @@ final class AppModel {
 
         refreshOverlayDisplayConfiguration()
         llmProxy.start()
+        startLLMStatsRefreshLoop()
         hasFinishedInit = true
+    }
+
+    // MARK: - LLM proxy / spend
+
+    var llmProxyPort: UInt16 { llmProxy.port }
+    var isLLMProxyRunning: Bool { llmProxy.isRunning }
+
+    func openLLMSpend() {
+        selectedSettingsTab = .llmSpend
+        showSettings()
+    }
+
+    func toggleLLMProxy() {
+        if llmProxy.isRunning {
+            llmProxy.stop()
+        } else {
+            llmProxy.start()
+        }
+    }
+
+    func setLLMProxyPort(_ port: UInt16) {
+        llmProxy.setPort(port)
+    }
+
+    func clearTodayLLMStats() {
+        let store = llmProxy.statsStore
+        Task { [weak self] in
+            await store.clearToday()
+            await self?.refreshLLMStatsSnapshotOnce()
+        }
+    }
+
+    private func startLLMStatsRefreshLoop() {
+        llmStatsRefreshTask?.cancel()
+        let store = llmProxy.statsStore
+        llmStatsRefreshTask = Task { @MainActor [weak self] in
+            // Initial fetch is synchronous-ish; subsequent ones poll.
+            while !Task.isCancelled {
+                let snapshot = await store.currentSnapshot()
+                self?.llmStatsSnapshot = snapshot
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+    }
+
+    private func refreshLLMStatsSnapshotOnce() async {
+        let snapshot = await llmProxy.statsStore.currentSnapshot()
+        self.llmStatsSnapshot = snapshot
     }
 
     var sessions: [AgentSession] {

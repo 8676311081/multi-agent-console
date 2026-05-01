@@ -196,3 +196,28 @@
 /* Window Titles */
 "window.settings" = "Open Island 設定";
 "window.debug" = "Open Island 除錯";
+
+/* Settings - LLM Spend */
+"settings.tab.llmSpend" = "LLM 花費";
+"settings.llmSpend.title" = "LLM 花費";
+"settings.llmSpend.subtitle" = "本機代理在 127.0.0.1 攔截 agent 流量，統計 token 並核算成本。";
+"settings.llmSpend.proxyRunning" = "代理執行中";
+"settings.llmSpend.proxyStopped" = "代理未執行";
+"settings.llmSpend.port" = "連接埠";
+"settings.llmSpend.todayTotal" = "今日";
+"settings.llmSpend.byClient" = "今日各用戶端";
+"settings.llmSpend.client.turns" = "輪次";
+"settings.llmSpend.client.tokens" = "tokens";
+"settings.llmSpend.lastWarning" = "最近一次重複工具呼叫";
+"settings.llmSpend.lastWarningTemplate" = "%@ 於 %@";
+"settings.llmSpend.controls" = "操作";
+"settings.llmSpend.startProxy" = "啟動代理";
+"settings.llmSpend.stopProxy" = "停止代理";
+"settings.llmSpend.applyPort" = "套用";
+"settings.llmSpend.clearToday" = "清空今日";
+"settings.llmSpend.onboardingTitle" = "尚無流量";
+"settings.llmSpend.onboardingBody" = "代理已就緒。匯出上面兩行環境變數後啟動 Claude Code 或 Codex，資料會在這裡顯示。";
+"settings.llmSpend.copy" = "複製";
+"settings.llmSpend.copied" = "已複製";
+"settings.llmSpend.unpriced" = "—";
+"settings.llmSpend.unpricedTooltip" = "部分輪次使用的模型不在價格表中：tokens 已計入，但金額未知。";

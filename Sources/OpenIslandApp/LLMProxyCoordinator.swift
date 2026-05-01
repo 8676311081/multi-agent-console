@@ -9,19 +9,27 @@ import os
 @MainActor
 final class LLMProxyCoordinator {
     private static let logger = Logger(subsystem: "app.openisland", category: "LLMProxyCoordinator")
+    static let portDefaultsKey = "OpenIsland.LLMProxy.port"
+    static let defaultPort: UInt16 = 9710
 
-    private let server: LLMProxyServer
+    private var server: LLMProxyServer
     let statsStore: LLMStatsStore
     let usageObserver: LLMUsageObserver
     private(set) var isRunning = false
 
     var port: UInt16 { server.configuration.port }
 
-    init(configuration: LLMProxyConfiguration = .default) {
-        self.server = LLMProxyServer(configuration: configuration)
+    init() {
+        self.server = LLMProxyServer(configuration: Self.makeConfiguration())
         let store = LLMStatsStore()
         self.statsStore = store
         self.usageObserver = LLMUsageObserver(store: store)
+    }
+
+    static func makeConfiguration() -> LLMProxyConfiguration {
+        let raw = UserDefaults.standard.integer(forKey: portDefaultsKey)
+        let port: UInt16 = (raw > 0 && raw <= 65535) ? UInt16(raw) : defaultPort
+        return LLMProxyConfiguration(port: port)
     }
 
     func start() {
@@ -40,5 +48,17 @@ final class LLMProxyCoordinator {
         guard isRunning else { return }
         server.stop()
         isRunning = false
+    }
+
+    /// Persist the new port and rebuild the underlying NWListener.
+    /// Stops + restarts only if it was running; if the user manually
+    /// stopped the proxy and edits the port, the next manual start
+    /// picks up the new value.
+    func setPort(_ newPort: UInt16) {
+        UserDefaults.standard.set(Int(newPort), forKey: Self.portDefaultsKey)
+        let wasRunning = isRunning
+        if wasRunning { stop() }
+        self.server = LLMProxyServer(configuration: LLMProxyConfiguration(port: newPort))
+        if wasRunning { start() }
     }
 }

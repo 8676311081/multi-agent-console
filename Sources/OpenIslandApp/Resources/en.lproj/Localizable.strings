@@ -227,3 +227,28 @@
 "settings.autoResponse.action.keyword" = "Keyword";
 "settings.autoResponse.save" = "Save";
 "settings.autoResponse.conflict" = "Deny takes precedence when multiple rules match.";
+
+/* Settings - LLM Spend */
+"settings.tab.llmSpend" = "LLM Spend";
+"settings.llmSpend.title" = "LLM Spend";
+"settings.llmSpend.subtitle" = "Local proxy intercepts agent traffic on 127.0.0.1, counts tokens, and computes cost.";
+"settings.llmSpend.proxyRunning" = "Proxy running";
+"settings.llmSpend.proxyStopped" = "Proxy stopped";
+"settings.llmSpend.port" = "Port";
+"settings.llmSpend.todayTotal" = "Today";
+"settings.llmSpend.byClient" = "By client (today)";
+"settings.llmSpend.client.turns" = "turns";
+"settings.llmSpend.client.tokens" = "tokens";
+"settings.llmSpend.lastWarning" = "Most recent duplicate tool call";
+"settings.llmSpend.lastWarningTemplate" = "%@ at %@";
+"settings.llmSpend.controls" = "Controls";
+"settings.llmSpend.startProxy" = "Start proxy";
+"settings.llmSpend.stopProxy" = "Stop proxy";
+"settings.llmSpend.applyPort" = "Apply";
+"settings.llmSpend.clearToday" = "Clear today";
+"settings.llmSpend.onboardingTitle" = "No traffic yet";
+"settings.llmSpend.onboardingBody" = "Proxy is ready. Export both lines and start Claude Code or Codex — usage will appear here.";
+"settings.llmSpend.copy" = "Copy";
+"settings.llmSpend.copied" = "Copied";
+"settings.llmSpend.unpriced" = "—";
+"settings.llmSpend.unpricedTooltip" = "Some turns used a model not in the pricing table; tokens counted but cost unknown.";

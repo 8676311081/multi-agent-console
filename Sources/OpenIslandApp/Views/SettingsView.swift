@@ -12,6 +12,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case appearance
     case watch
     case autoResponse
+    case llmSpend
     case shortcuts
     case lab
     case about
@@ -27,6 +28,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .sound:        lang.t("settings.tab.sound")
         case .watch:        "Watch"
         case .autoResponse: lang.t("settings.tab.autoResponse")
+        case .llmSpend:     lang.t("settings.tab.llmSpend")
         case .shortcuts:    lang.t("settings.tab.shortcuts")
         case .lab:          lang.t("settings.tab.lab")
         case .about:        lang.t("settings.tab.about")
@@ -42,6 +44,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .sound:        "speaker.wave.2.fill"
         case .watch:        "applewatch"
         case .autoResponse: "bolt.fill"
+        case .llmSpend:     "dollarsign.circle.fill"
         case .shortcuts:    "keyboard.fill"
         case .lab:          "flask.fill"
         case .about:        "info.circle.fill"
@@ -57,6 +60,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .sound:        .green
         case .watch:        .cyan
         case .autoResponse: .yellow
+        case .llmSpend:     .green
         case .shortcuts:    .gray
         case .lab:          .pink
         case .about:        .blue
@@ -65,9 +69,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var section: SettingsSection {
         switch self {
-        case .general, .setup, .display, .sound, .appearance, .watch, .autoResponse: .system
-        case .shortcuts, .lab:                                                       .advanced
-        case .about:                                                                 .app
+        case .general, .setup, .display, .sound, .appearance, .watch, .autoResponse, .llmSpend: .system
+        case .shortcuts, .lab:                                                                  .advanced
+        case .about:                                                                            .app
         }
     }
 }
@@ -107,6 +111,18 @@ struct SettingsView: View {
         }
         .frame(minWidth: 680, idealWidth: 780, minHeight: 480, idealHeight: 560)
         .preferredColorScheme(.dark)
+        .onAppear { consumeDeepLinkIfPresent() }
+        .onChange(of: model.selectedSettingsTab) { _, _ in
+            consumeDeepLinkIfPresent()
+        }
+    }
+
+    /// If `model.selectedSettingsTab` is non-nil, jump to it and clear
+    /// the value so the next manual open of Settings doesn't redirect.
+    private func consumeDeepLinkIfPresent() {
+        guard let target = model.selectedSettingsTab else { return }
+        selectedTab = target
+        model.selectedSettingsTab = nil
     }
 
     // MARK: Sidebar
@@ -151,6 +167,8 @@ struct SettingsView: View {
                 WatchSettingsPane(model: model)
             case .autoResponse:
                 AutoResponseSettingsPane(model: model)
+            case .llmSpend:
+                LLMSpendSettingsPane(model: model)
             case .shortcuts:
                 PlaceholderSettingsPane(model: model, titleKey: "settings.tab.shortcuts", subtitleKey: "settings.shortcuts.comingSoon")
             case .lab:

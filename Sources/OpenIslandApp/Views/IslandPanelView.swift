@@ -429,6 +429,19 @@ struct IslandPanelView: View {
 
     private var openedHeaderButtons: some View {
         HStack(spacing: Self.headerControlSpacing) {
+            if let spendLabel = todayLLMSpendLabel {
+                Button(action: { model.openLLMSpend() }) {
+                    Text(spendLabel)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.horizontal, 8)
+                        .frame(height: Self.headerControlButtonSize)
+                        .background(.white.opacity(0.08), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Today's LLM spend — click for breakdown")
+            }
+
             headerIconButton(
                 systemName: model.isSoundMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
                 tint: model.isSoundMuted ? .orange.opacity(0.92) : .white.opacity(0.62)
@@ -444,6 +457,36 @@ struct IslandPanelView: View {
                 model.showSettings()
             }
         }
+    }
+
+    /// Today's accumulated LLM spend, formatted as a short pill — or nil
+    /// if there's nothing to show. Hides when today's cost is zero so
+    /// idle proxies don't claim header real estate.
+    private var todayLLMSpendLabel: String? {
+        let key = LLMStatsStore.dayKey(for: Date())
+        guard let buckets = model.llmStatsSnapshot.days[key], !buckets.isEmpty else {
+            return nil
+        }
+        var cost: Double = 0
+        var hasTurns = false
+        var hasUnpriced = false
+        var anyPriced = false
+        for bucket in buckets.values where bucket.turns > 0 {
+            hasTurns = true
+            cost += bucket.costUsd
+            if bucket.unpricedTurns > 0 { hasUnpriced = true }
+            if bucket.unpricedTurns < bucket.turns { anyPriced = true }
+        }
+        guard hasTurns else { return nil }
+        // All turns unpriced → don't show a misleading $0.00 pill, but
+        // do hint at the dropped tracking.
+        if !anyPriced { return "—" }
+        // Genuine $0 (nothing happened that we can price → cost=0 with
+        // zero unpriced turns is impossible here since we'd have hit the
+        // `!anyPriced` branch). So cost > 0 from this point.
+        let prefix = hasUnpriced ? "~" : ""
+        let formatted: String = cost < 0.01 ? "<$0.01" : String(format: "$%.2f", cost)
+        return prefix + formatted
     }
 
     private func headerIconButton(
