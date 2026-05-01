@@ -279,13 +279,22 @@ public final class LLMProxyServer: @unchecked Sendable {
             return
         }
 
+        // Apply the single permitted body mutation. See LLMRequestRewriter
+        // for the full rationale.
+        let outboundBody: Data
+        if upstream == .openai, LLMRequestRewriter.shouldRewrite(path: head.path) {
+            outboundBody = LLMRequestRewriter.rewrittenChatCompletionsBody(body)
+        } else {
+            outboundBody = body
+        }
+
         let context = LLMProxyRequestContext(
             id: UUID(),
             upstream: upstream,
             method: head.method,
             path: head.path,
             requestHeaders: head.headers,
-            requestBody: body,
+            requestBody: outboundBody,
             receivedAt: Date(),
             userAgent: head.header("user-agent")
         )
