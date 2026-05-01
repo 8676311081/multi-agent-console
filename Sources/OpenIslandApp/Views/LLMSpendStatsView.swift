@@ -49,6 +49,7 @@ struct LLMSpendStatsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     contextFillBanner
+                    lowCacheHitBanner
                     rangePicker
                     if rangeData.isEmpty {
                         emptyState
@@ -71,6 +72,72 @@ struct LLMSpendStatsView: View {
     /// can't disagree on what "yellow" means.
     static let contextFillWarnThreshold: Double = 0.60
     static let contextFillCriticalThreshold: Double = 0.85
+
+    /// Cache-hit ratio below which we suggest a compression tool.
+    /// Rationale (review C alternative-plan): below ~30% the user
+    /// is paying full uncached prompt tokens often enough that
+    /// pointing them at RTK / similar wrappers is likely to help;
+    /// above 30% the gain from compression is dwarfed by the
+    /// existing cache wins, so the suggestion would be noise.
+    static let LOW_CACHE_HIT_THRESHOLD: Double = 0.30
+    /// Number of buckets we require before showing the cache banner —
+    /// the ratio over a single day is too noisy to trust.
+    static let CACHE_BANNER_MIN_DAYS: Int = 3
+
+    @ViewBuilder
+    private var lowCacheHitBanner: some View {
+        if let ratio = recentWeekCacheHit(), ratio < Self.LOW_CACHE_HIT_THRESHOLD {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "arrow.down.circle")
+                    .foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(lang.t("settings.llmSpend.stats.lowCacheHitTitle"))
+                        .font(.subheadline.weight(.semibold))
+                    Text(String(
+                        format: lang.t("settings.llmSpend.stats.lowCacheHitBody"),
+                        Int((ratio * 100).rounded())
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            .padding(12)
+            .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    /// Weighted cache-hit ratio over the last 7 days:
+    ///   sum(cacheRead) / sum(cacheRead + cacheCreation + input)
+    /// Returns `nil` when the buckets covering that window have no
+    /// breakdown data (legacy snapshot) or fewer than
+    /// `CACHE_BANNER_MIN_DAYS` distinct days with traffic — too
+    /// little signal to act on. Independent of the
+    /// Today/Week/Month/All time-range picker because the banner is
+    /// a current-state nudge, not a per-range stat.
+    private func recentWeekCacheHit() -> Double? {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let formatter = Self.dayKeyFormatter
+        var buckets: [LLMDayBucket] = []
+        var daysWithTraffic = 0
+        for offset in 0..<7 {
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else {
+                continue
+            }
+            let key = formatter.string(from: day)
+            guard let dayBuckets = model.llmStatsSnapshot.days[key] else { continue }
+            var anyTraffic = false
+            for bucket in dayBuckets.values where bucket.turns > 0 {
+                buckets.append(bucket)
+                anyTraffic = true
+            }
+            if anyTraffic { daysWithTraffic += 1 }
+        }
+        guard daysWithTraffic >= Self.CACHE_BANNER_MIN_DAYS else { return nil }
+        return LLMCacheHitAggregator.ratio(of: buckets)
+    }
 
     @ViewBuilder
     private var contextFillBanner: some View {

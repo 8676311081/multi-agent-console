@@ -250,6 +250,8 @@
 "settings.llmSpend.stats.contextFillWarning" = "接近上下文上限";
 "settings.llmSpend.stats.contextFillCritical" = "上下文即將佔滿 — 建議 /clear 或開新會話";
 "settings.llmSpend.stats.contextFillSubtitle" = "本輪已使用模型上下文視窗的 %d%%。";
+"settings.llmSpend.stats.lowCacheHitTitle" = "本週快取命中率偏低";
+"settings.llmSpend.stats.lowCacheHitBody" = "近 7 天平均 %d%%。Prompt 壓縮 hook（如上方 Compression 區塊的 RTK）可以瘦身每次回流的 Bash 工具結果，從而提升快取命中比例。";
 "settings.llmSpend.stats.wastedTooltip" = "本用戶端為模型未呼叫的工具 schema 支付的估計 tokens 總數。範圍內累加。僅近似——使用 CJK 感知的字元比例估算，非上游 tokenizer。";
 "settings.llmSpend.stats.cardSavedByCompression" = "壓縮節省";
 "settings.llmSpend.stats.savedByCompressionTooltip" = "RTK 跨所有 AI 編碼用戶端從 Bash 輸出中剝除的累計 tokens。資料來源 rtk gain。";
