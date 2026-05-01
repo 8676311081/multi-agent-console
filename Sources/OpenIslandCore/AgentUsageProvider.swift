@@ -49,7 +49,13 @@ public struct AgentUsageSnapshot: Sendable, Equatable, Codable {
         self.capturedAt = capturedAt
     }
 
-    public var isEmpty: Bool { windows.isEmpty }
+    /// `true` when the snapshot has nothing the UI would render —
+    /// no windows AND no plan label. A snapshot with only a plan
+    /// label (e.g. Cursor reports "Free" but ships no local quota
+    /// data) still displays as a card with "quota unavailable",
+    /// which is more useful than dropping the agent from the panel
+    /// entirely.
+    public var isEmpty: Bool { windows.isEmpty && planLabel == nil }
 }
 
 /// One per agent. The 2.5 panel asks each provider concurrently;
