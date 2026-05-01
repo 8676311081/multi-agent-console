@@ -73,29 +73,27 @@ public final class ClaudeHookInstallationManager: @unchecked Sendable {
 
     @discardableResult
     public func install(hooksBinaryURL: URL) throws -> ClaudeHookInstallationStatus {
-        try fileManager.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
-
-        let settingsURL = claudeDirectory.appendingPathComponent("settings.json")
         let manifestURL = claudeDirectory.appendingPathComponent(ClaudeHookInstallerManifest.fileName)
         let legacyManifestURL = claudeDirectory.appendingPathComponent(ClaudeHookInstallerManifest.legacyFileName)
-        let existingSettings = try? Data(contentsOf: settingsURL)
         let installedHooksBinaryURL = try ManagedHooksBinary.install(
             from: hooksBinaryURL,
             to: managedHooksBinaryURL,
             fileManager: fileManager
         )
         let command = ClaudeHookInstaller.hookCommand(for: installedHooksBinaryURL.path, source: hookSource)
-        let mutation = try ClaudeHookInstaller.installSettingsJSON(
-            existingData: existingSettings,
-            hookCommand: command
-        )
 
-        if mutation.changed, fileManager.fileExists(atPath: settingsURL.path) {
-            try backupFile(at: settingsURL)
-        }
-
-        if let contents = mutation.contents {
-            try contents.write(to: settingsURL, options: .atomic)
+        try ClaudeSettingsBackupHelper.writeClaudeSettings(
+            directory: claudeDirectory,
+            fileManager: fileManager
+        ) { existing in
+            let mutation = try ClaudeHookInstaller.installSettingsJSON(
+                existingData: existing,
+                hookCommand: command
+            )
+            guard mutation.changed, let contents = mutation.contents else {
+                return .noChange
+            }
+            return .write(contents)
         }
 
         let manifest = ClaudeHookInstallerManifest(hookCommand: command)
@@ -112,25 +110,24 @@ public final class ClaudeHookInstallationManager: @unchecked Sendable {
 
     @discardableResult
     public func uninstall() throws -> ClaudeHookInstallationStatus {
-        let settingsURL = claudeDirectory.appendingPathComponent("settings.json")
         let manifestURL = resolvedManifestURL()
         let primaryManifestURL = claudeDirectory.appendingPathComponent(ClaudeHookInstallerManifest.fileName)
         let legacyManifestURL = claudeDirectory.appendingPathComponent(ClaudeHookInstallerManifest.legacyFileName)
         let manifest = try loadManifest(at: manifestURL)
-        let existingSettings = try? Data(contentsOf: settingsURL)
-        let mutation = try ClaudeHookInstaller.uninstallSettingsJSON(
-            existingData: existingSettings,
-            managedCommand: manifest?.hookCommand
-        )
 
-        if mutation.changed, fileManager.fileExists(atPath: settingsURL.path) {
-            try backupFile(at: settingsURL)
-        }
-
-        if let contents = mutation.contents {
-            try contents.write(to: settingsURL, options: .atomic)
-        } else if fileManager.fileExists(atPath: settingsURL.path) {
-            try fileManager.removeItem(at: settingsURL)
+        try ClaudeSettingsBackupHelper.writeClaudeSettings(
+            directory: claudeDirectory,
+            fileManager: fileManager
+        ) { existing in
+            let mutation = try ClaudeHookInstaller.uninstallSettingsJSON(
+                existingData: existing,
+                managedCommand: manifest?.hookCommand
+            )
+            guard mutation.changed else { return .noChange }
+            if let contents = mutation.contents {
+                return .write(contents)
+            }
+            return .delete
         }
 
         for candidate in [primaryManifestURL, legacyManifestURL] where fileManager.fileExists(atPath: candidate.path) {
@@ -173,18 +170,4 @@ public final class ClaudeHookInstallationManager: @unchecked Sendable {
         return managedHooksBinaryURL
     }
 
-    private func backupFile(at url: URL) throws {
-        guard fileManager.fileExists(atPath: url.path) else {
-            return
-        }
-
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        let timestamp = formatter.string(from: .now).replacingOccurrences(of: ":", with: "-")
-        let backupURL = url.appendingPathExtension("backup.\(timestamp)")
-        if fileManager.fileExists(atPath: backupURL.path) {
-            try fileManager.removeItem(at: backupURL)
-        }
-        try fileManager.copyItem(at: url, to: backupURL)
-    }
 }

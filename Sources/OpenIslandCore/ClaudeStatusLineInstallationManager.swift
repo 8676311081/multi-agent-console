@@ -99,7 +99,10 @@ public final class ClaudeStatusLineInstallationManager: @unchecked Sendable {
         let scriptURL = scriptDirectoryURL.appendingPathComponent(Self.managedScriptName)
         let legacyScriptURL = legacyScriptDirectoryURL.appendingPathComponent(Self.legacyManagedScriptName)
 
-        let settings = try loadSettings(at: settingsURL)
+        let settings = try ClaudeSettingsBackupHelper.currentSettings(
+            directory: claudeDirectory,
+            fileManager: fileManager
+        )
         let statusLine = settings["statusLine"] as? [String: Any]
         let command = statusLine?["command"] as? String
         let managedCommands = [scriptURL.path, legacyScriptURL.path]
@@ -137,22 +140,17 @@ public final class ClaudeStatusLineInstallationManager: @unchecked Sendable {
             )
         }
 
-        try fileManager.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: scriptDirectoryURL, withIntermediateDirectories: true)
 
-        let settingsURL = currentStatus.settingsURL
         let scriptURL = currentStatus.scriptURL
-        let existingSettings = try loadSettings(at: settingsURL)
-        var mutatedSettings = existingSettings
-        mutatedSettings["statusLine"] = managedStatusLine(for: scriptURL)
-
-        let settingsData = try serializeSettings(mutatedSettings)
-        if fileManager.fileExists(atPath: settingsURL.path) {
-            try backupFile(at: settingsURL)
+        try ClaudeSettingsBackupHelper.mutateClaudeSettings(
+            directory: claudeDirectory,
+            fileManager: fileManager
+        ) { settings in
+            settings["statusLine"] = self.managedStatusLine(for: scriptURL)
         }
 
         let scriptContents = Self.managedScript(cacheURL: currentStatus.cacheURL)
-        try settingsData.write(to: settingsURL, options: .atomic)
         try scriptContents.write(to: scriptURL, atomically: true, encoding: .utf8)
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
         let legacyScriptURL = legacyScriptDirectoryURL.appendingPathComponent(Self.legacyManagedScriptName)
@@ -176,23 +174,20 @@ public final class ClaudeStatusLineInstallationManager: @unchecked Sendable {
             throw ClaudeStatusLineInstallationError.wrappableCommandMissing
         }
 
-        try fileManager.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: scriptDirectoryURL, withIntermediateDirectories: true)
 
-        let settingsURL = currentStatus.settingsURL
         let scriptURL = currentStatus.scriptURL
         let delegateScriptURL = scriptDirectoryURL.appendingPathComponent(Self.wrappedDelegateScriptName)
-        var mutatedSettings = try loadSettings(at: settingsURL)
 
-        // Preserve the user's original statusLine dict so uninstall can restore it verbatim.
-        if let originalStatusLine = mutatedSettings["statusLine"] {
-            mutatedSettings[openIslandOriginalStatusLineKey] = originalStatusLine
-        }
-        mutatedSettings["statusLine"] = managedStatusLine(for: scriptURL)
-
-        let settingsData = try serializeSettings(mutatedSettings)
-        if fileManager.fileExists(atPath: settingsURL.path) {
-            try backupFile(at: settingsURL)
+        try ClaudeSettingsBackupHelper.mutateClaudeSettings(
+            directory: claudeDirectory,
+            fileManager: fileManager
+        ) { settings in
+            // Preserve the user's original statusLine dict so uninstall can restore it verbatim.
+            if let originalStatusLine = settings["statusLine"] {
+                settings[openIslandOriginalStatusLineKey] = originalStatusLine
+            }
+            settings["statusLine"] = self.managedStatusLine(for: scriptURL)
         }
 
         let wrapperContents = Self.wrappedScript(
@@ -201,7 +196,6 @@ public final class ClaudeStatusLineInstallationManager: @unchecked Sendable {
         )
         let delegateContents = Self.wrappedDelegateScript(originalCommand: originalCommand)
 
-        try settingsData.write(to: settingsURL, options: .atomic)
         try wrapperContents.write(to: scriptURL, atomically: true, encoding: .utf8)
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
         try delegateContents.write(to: delegateScriptURL, atomically: true, encoding: .utf8)
@@ -213,24 +207,22 @@ public final class ClaudeStatusLineInstallationManager: @unchecked Sendable {
     @discardableResult
     public func uninstall() throws -> ClaudeStatusLineInstallationStatus {
         let currentStatus = try status()
-        let settingsURL = currentStatus.settingsURL
         let scriptURL = currentStatus.scriptURL
         let delegateScriptURL = scriptDirectoryURL.appendingPathComponent(Self.wrappedDelegateScriptName)
 
         if currentStatus.managedStatusLineConfigured {
-            var settings = try loadSettings(at: settingsURL)
-            // Restore the user's original statusLine when we were running in wrapper mode.
-            if let savedOriginal = settings[openIslandOriginalStatusLineKey] {
-                settings["statusLine"] = savedOriginal
-                settings.removeValue(forKey: openIslandOriginalStatusLineKey)
-            } else {
-                settings.removeValue(forKey: "statusLine")
+            try ClaudeSettingsBackupHelper.mutateClaudeSettings(
+                directory: claudeDirectory,
+                fileManager: fileManager
+            ) { settings in
+                // Restore the user's original statusLine when we were running in wrapper mode.
+                if let savedOriginal = settings[openIslandOriginalStatusLineKey] {
+                    settings["statusLine"] = savedOriginal
+                    settings.removeValue(forKey: openIslandOriginalStatusLineKey)
+                } else {
+                    settings.removeValue(forKey: "statusLine")
+                }
             }
-            if fileManager.fileExists(atPath: settingsURL.path) {
-                try backupFile(at: settingsURL)
-            }
-            let settingsData = try serializeSettings(settings)
-            try settingsData.write(to: settingsURL, options: .atomic)
         }
 
         if fileManager.fileExists(atPath: scriptURL.path) {
@@ -247,44 +239,12 @@ public final class ClaudeStatusLineInstallationManager: @unchecked Sendable {
         return try status()
     }
 
-    private func loadSettings(at url: URL) throws -> [String: Any] {
-        guard fileManager.fileExists(atPath: url.path) else {
-            return [:]
-        }
-
-        let data = try Data(contentsOf: url)
-        let object = try JSONSerialization.jsonObject(with: data)
-        guard let settings = object as? [String: Any] else {
-            throw ClaudeStatusLineInstallationError.invalidSettingsRoot
-        }
-        return settings
-    }
-
-    private func serializeSettings(_ settings: [String: Any]) throws -> Data {
-        try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
-    }
-
     private func managedStatusLine(for scriptURL: URL) -> [String: Any] {
         [
             "type": "command",
             "command": scriptURL.path,
             "padding": 2,
         ]
-    }
-
-    private func backupFile(at url: URL) throws {
-        guard fileManager.fileExists(atPath: url.path) else {
-            return
-        }
-
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        let timestamp = formatter.string(from: .now).replacingOccurrences(of: ":", with: "-")
-        let backupURL = url.appendingPathExtension("backup.\(timestamp)")
-        if fileManager.fileExists(atPath: backupURL.path) {
-            try fileManager.removeItem(at: backupURL)
-        }
-        try fileManager.copyItem(at: url, to: backupURL)
     }
 
     /// The wrapper script executed as Claude Code's `statusLine.command` in wrap mode.
