@@ -283,6 +283,11 @@
 "settings.llmSpend.stats.contextFillSubtitle" = "%d%% of the model's context window is in use this turn.";
 "settings.llmSpend.stats.lowCacheHitTitle" = "Cache hit rate is low this week";
 "settings.llmSpend.stats.lowCacheHitBody" = "Average %d%% over the last 7 days. A prompt-compression hook (e.g. RTK in the Compression section above) can shrink the part of every Bash tool result that re-enters context, raising the share that lands in cache.";
+"settings.llmSpend.agents.title" = "Agents";
+"settings.llmSpend.agents.subtitle" = "Per-agent quota and plan info. Some sources are reverse-engineered from each vendor's local files and may break on vendor updates.";
+"settings.llmSpend.agents.unofficialBadge" = "unofficial";
+"settings.llmSpend.agents.unofficialTooltip" = "Reverse-engineered from local data; may break on vendor updates.";
+"settings.llmSpend.agents.quotaUnavailable" = "Quota data unavailable";
 "settings.llmSpend.stats.wastedTooltip" = "Estimated tokens this client paid to ship as tool schemas the model never invoked. Sum across the selected range. Approximate — uses a CJK-aware char-ratio estimator, not the upstream tokenizer.";
 "settings.llmSpend.stats.cardSavedByCompression" = "Saved by compression";
 "settings.llmSpend.stats.savedByCompressionTooltip" = "Cumulative tokens RTK has stripped from Bash tool output across all your AI coding agents. Sourced from rtk gain.";

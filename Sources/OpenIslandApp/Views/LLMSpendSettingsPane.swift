@@ -12,6 +12,7 @@ struct LLMSpendSettingsPane: View {
     @State private var copiedKey: String?
     @State private var showStatsSheet: Bool = false
     @State private var showRTKConfirmSheet: Bool = false
+    @State private var agentSnapshots: [AgentUsageSnapshot] = []
 
     private var lang: LanguageManager { model.lang }
 
@@ -38,6 +39,7 @@ struct LLMSpendSettingsPane: View {
                 controlsSection
                 upstreamsSection
                 compressionSection
+                agentsSection
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -50,6 +52,7 @@ struct LLMSpendSettingsPane: View {
             // binary outside the app" case without waiting for the
             // 30 s watchdog tick.
             model.hooks.refreshRtkStatus()
+            Task { @MainActor in await loadAgentUsages() }
         }
         .onChange(of: model.llmProxyPort) { _, _ in syncFields() }
         .onChange(of: model.llmProxyOpenAIUpstream) { _, _ in syncFields() }
@@ -611,6 +614,135 @@ struct LLMSpendSettingsPane: View {
         }
         .padding(20)
         .frame(width: 480)
+    }
+
+    // MARK: - Agents (per-agent quota / plan info)
+
+    /// Loads each `AgentUsageProvider` sequentially. Order is
+    /// deterministic — the panel always renders Claude → Codex →
+    /// Cursor in that order regardless of which providers actually
+    /// returned data. Copilot is intentionally NOT listed: a probe
+    /// of local data sources (CLI not installed at the spec'd
+    /// paths, VS Code globalStorage carries only an SKU string with
+    /// no quota, GitHub `copilot/*` REST endpoints all 404 as of
+    /// 2026-05) found no usable data. Provider deferred to Phase 3
+    /// if/when GitHub publishes an official quota API or the VS
+    /// Code extension data proves stable across updates. The
+    /// `.copilot` `LLMClient` enum case added in Phase 2.1 is
+    /// retained as a forward-compatibility placeholder.
+    @MainActor
+    private func loadAgentUsages() async {
+        let providers: [any AgentUsageProvider] = [
+            ClaudeAgentUsageProvider(),
+            CodexAgentUsageProvider(),
+            CursorUsageProvider(),
+        ]
+        var collected: [AgentUsageSnapshot] = []
+        for provider in providers {
+            if let snap = await provider.load(), !snap.isEmpty {
+                collected.append(snap)
+            }
+        }
+        self.agentSnapshots = collected
+    }
+
+    @ViewBuilder
+    private var agentsSection: some View {
+        if !agentSnapshots.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(lang.t("settings.llmSpend.agents.title"))
+                        .font(.headline)
+                    Text(lang.t("settings.llmSpend.agents.subtitle"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                VStack(spacing: 8) {
+                    ForEach(agentSnapshots, id: \.client) { snap in
+                        agentCard(snap)
+                    }
+                }
+            }
+        }
+    }
+
+    private func agentCard(_ snap: AgentUsageSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(Self.color(for: snap.client))
+                    .frame(width: 8, height: 8)
+                Text(snap.client.displayName)
+                    .font(.subheadline.weight(.semibold))
+                if let plan = snap.planLabel, !plan.isEmpty {
+                    Text(plan)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+                }
+                if snap.source.isUnofficial {
+                    HStack(spacing: 3) {
+                        Image(systemName: "info.circle")
+                        Text(lang.t("settings.llmSpend.agents.unofficialBadge"))
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .help(lang.t("settings.llmSpend.agents.unofficialTooltip"))
+                }
+                Spacer()
+            }
+            if snap.windows.isEmpty {
+                Text(lang.t("settings.llmSpend.agents.quotaUnavailable"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(snap.windows, id: \.label) { w in
+                    agentUsageWindowRow(w)
+                }
+            }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func agentUsageWindowRow(_ w: AgentUsageWindow) -> some View {
+        HStack(spacing: 10) {
+            Text(w.label)
+                .font(.caption.weight(.medium).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 50, alignment: .leading)
+            ProgressView(value: min(1.0, max(0.0, w.usedPercentage / 100)))
+                .progressViewStyle(.linear)
+                .tint(Self.color(forUsedPercentage: w.usedPercentage))
+            Text("\(w.roundedUsedPercentage)%")
+                .font(.caption.monospacedDigit())
+                .frame(width: 40, alignment: .trailing)
+        }
+    }
+
+    /// Per-client dot color. Mirrors `LLMSpendStatsView.color(for:)`
+    /// — kept duplicated rather than extracted to a shared helper
+    /// because the two views are tab/sheet siblings, not a
+    /// component family yet.
+    private static func color(for client: LLMClient) -> Color {
+        switch client {
+        case .claudeCode: return .orange
+        case .codex:      return .blue
+        case .cursor:     return .purple
+        case .copilot:    return .green
+        case .unknown:    return .secondary
+        }
+    }
+
+    /// Same 60/85% thresholds the context-fill bar uses on the
+    /// island pill. Centralized so the two visual languages don't
+    /// drift apart.
+    private static func color(forUsedPercentage pct: Double) -> Color {
+        if pct >= LLMSpendStatsView.contextFillCriticalThreshold * 100 { return .red }
+        if pct >= LLMSpendStatsView.contextFillWarnThreshold * 100 { return .orange }
+        return .blue
     }
 }
 

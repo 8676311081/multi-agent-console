@@ -283,6 +283,11 @@
 "settings.llmSpend.stats.contextFillSubtitle" = "本轮已使用模型上下文窗口的 %d%%。";
 "settings.llmSpend.stats.lowCacheHitTitle" = "本周缓存命中率偏低";
 "settings.llmSpend.stats.lowCacheHitBody" = "近 7 天平均 %d%%。Prompt 压缩 hook（如上方 Compression 区块的 RTK）可以瘦身每次回流的 Bash 工具结果，从而提升缓存命中比例。";
+"settings.llmSpend.agents.title" = "Agent 配额";
+"settings.llmSpend.agents.subtitle" = "各 agent 的配额和订阅信息。部分来源是从厂商本地文件反推出来的，厂商升级后可能失效。";
+"settings.llmSpend.agents.unofficialBadge" = "非官方";
+"settings.llmSpend.agents.unofficialTooltip" = "数据来自反向解析厂商本地文件；厂商升级后可能失效。";
+"settings.llmSpend.agents.quotaUnavailable" = "配额数据不可读";
 "settings.llmSpend.stats.wastedTooltip" = "本客户端为模型未调用的工具 schema 支付的估计 tokens 总数。范围内累加。仅近似——使用 CJK 感知的字符比例估算，不是上游 tokenizer。";
 "settings.llmSpend.stats.cardSavedByCompression" = "压缩节省";
 "settings.llmSpend.stats.savedByCompressionTooltip" = "RTK 跨所有 AI 编码客户端从 Bash 输出中剥除的累计 tokens。数据来源 rtk gain。";
