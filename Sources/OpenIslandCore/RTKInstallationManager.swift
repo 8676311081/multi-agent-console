@@ -9,21 +9,18 @@ public struct RTKInstallationStatus: Equatable, Sendable {
         case unsupportedArchitecture
         case notInstalled
         case installedDisabled    // binary on disk, no settings.json hook
-        case installedEnabled     // binary + wrapper + settings.json hook
-        case needsRepair          // hook present but binary or wrapper missing
+        case installedEnabled     // binary executable + settings.json hook
+        case needsRepair          // hook present but binary missing
     }
 
     public var state: State
     public var arch: String
     public var rtkVersion: String
     public var binaryURL: URL
-    public var wrapperURL: URL
-    public var statsJSONLURL: URL
     public var pidFileURL: URL
     public var settingsURL: URL
     public var binaryPresent: Bool
     public var binaryExecutable: Bool
-    public var wrapperPresent: Bool
     public var hookConfigured: Bool
 
     public init(
@@ -31,26 +28,20 @@ public struct RTKInstallationStatus: Equatable, Sendable {
         arch: String,
         rtkVersion: String,
         binaryURL: URL,
-        wrapperURL: URL,
-        statsJSONLURL: URL,
         pidFileURL: URL,
         settingsURL: URL,
         binaryPresent: Bool,
         binaryExecutable: Bool,
-        wrapperPresent: Bool,
         hookConfigured: Bool
     ) {
         self.state = state
         self.arch = arch
         self.rtkVersion = rtkVersion
         self.binaryURL = binaryURL
-        self.wrapperURL = wrapperURL
-        self.statsJSONLURL = statsJSONLURL
         self.pidFileURL = pidFileURL
         self.settingsURL = settingsURL
         self.binaryPresent = binaryPresent
         self.binaryExecutable = binaryExecutable
-        self.wrapperPresent = wrapperPresent
         self.hookConfigured = hookConfigured
     }
 }
@@ -66,6 +57,10 @@ public enum RTKInstallError: LocalizedError, Sendable {
     case binaryNotExecutable
     case alreadyInstalled
     case notInstalled
+    /// `~/.local/bin/rtk` already exists and is not the symlink we'd
+    /// create. We refuse to clobber a user's hand-installed RTK
+    /// (Homebrew, cargo, vendored copy, etc.).
+    case userLocalBinConflicted(path: String, kind: String)
 
     public var errorDescription: String? {
         switch self {
@@ -85,6 +80,8 @@ public enum RTKInstallError: LocalizedError, Sendable {
             return "RTK is already installed."
         case .notInstalled:
             return "RTK is not installed."
+        case let .userLocalBinConflicted(path, kind):
+            return "Refusing to overwrite \(path) (\(kind)). Remove it manually, or pin RTK at that location yourself."
         }
     }
 }
@@ -94,22 +91,33 @@ public enum RTKInstallError: LocalizedError, Sendable {
 /// Installs RTK (https://github.com/rtk-ai/rtk) as a Claude Code PreToolUse
 /// hook. Three artifacts on disk:
 ///
-/// - `~/.open-island/bin/rtk`             — the upstream binary, downloaded
-///                                          and SHA256-verified at install
-/// - `~/.open-island/bin/rtk-wrapper.sh`  — Open Island wrapper, references
-///                                          the binary and tees `[rtk]`
-///                                          stderr lines into `rtk-stats.jsonl`
-/// - `~/.claude/settings.json`            — gains a PreToolUse hook entry
-///                                          pointing at `rtk-wrapper.sh`
-///                                          (settings are mutated through
-///                                          `ClaudeSettingsBackupHelper`,
-///                                          so a timestamped backup lands
-///                                          on disk before the rewrite)
+/// - `~/.open-island/bin/rtk`   — the upstream binary, downloaded and
+///                                SHA256-verified at install time
+/// - `~/.local/bin/rtk`         — symlink → `~/.open-island/bin/rtk`.
+///                                Required because `rtk hook claude`
+///                                rewrites Bash commands to bare
+///                                `rtk <subcommand>` (relative; no
+///                                env override exposes a binary path),
+///                                and Claude Code spawns the rewritten
+///                                string via `$PATH` lookup. See the
+///                                symlink step in `install()`.
+/// - `~/.claude/settings.json`  — gains a PreToolUse hook entry whose
+///                                command is `<bin> hook claude` (RTK's
+///                                stdin/stdout PreToolUse handler).
+///                                settings are mutated through
+///                                `ClaudeSettingsBackupHelper` so a
+///                                timestamped backup lands on disk
+///                                before the rewrite.
 ///
-/// All three are removed on `uninstall()`. The combination of helper-
-/// guarded backup + RTK watchdog (rolls back settings if the binary goes
+/// Telemetry is read from RTK's own SQLite store via `rtk gain --format
+/// json` in a separate poller; this manager is install/uninstall only.
+///
+/// All three are reversed on `uninstall()` (symlink only if it still
+/// points at our binary — an alien target means the user repointed it
+/// manually and we leave it alone). The combination of helper-guarded
+/// backup + RTK watchdog (rolls back settings if the binary goes
 /// missing) means a fresh `~/.claude/settings.json` after uninstall is
-/// byte-identical to the snapshot before install.
+/// JSON-equivalent to the snapshot before install.
 public final class RTKInstallationManager: @unchecked Sendable {
 
     // MARK: Pinned version + checksum
@@ -140,12 +148,28 @@ public final class RTKInstallationManager: @unchecked Sendable {
     // MARK: File names
 
     public static let binaryFileName = "rtk"
-    public static let wrapperFileName = "rtk-wrapper.sh"
-    public static let statsFileName = "rtk-stats.jsonl"
     public static let pidFileName = "rtk-watchdog.pid"
+
+    /// Legacy wrapper file written by pre-fix versions of the installer.
+    /// Removed on uninstall when present so an upgrade-then-uninstall
+    /// cycle leaves no orphans behind.
+    public static let legacyWrapperFileName = "rtk-wrapper.sh"
+
+    /// Legacy telemetry file written by pre-fix wrapper. Removed on
+    /// uninstall when present (and never created by the post-fix path).
+    public static let legacyStatsJSONLFileName = "rtk-stats.jsonl"
 
     public static let preToolUseMatcher = "Bash"
     public static let supportedArchitecture = "arm64"
+
+    /// The RTK subcommand string we register as Claude Code's
+    /// PreToolUse hook command. Claude Code shell-parses the
+    /// `command` field (verified: existing hook entries in
+    /// `settings.json` use space-separated args, and the Claude
+    /// Code binary contains `Bun.spawnSync` against `/bin/sh`),
+    /// so passing `<binary> hook claude` as a single string works
+    /// without any wrapper script in between.
+    public static let hookSubcommand = "hook claude"
 
     // MARK: Configuration
 
@@ -156,10 +180,31 @@ public final class RTKInstallationManager: @unchecked Sendable {
     public let openIslandBinDirURL: URL
     public let claudeDirectory: URL
     public let binaryURL: URL
-    public let wrapperURL: URL
-    public let statsJSONLURL: URL
     public let pidFileURL: URL
     public let settingsURL: URL
+
+    /// `~/.local/bin/` — already on the user's `$PATH` via the standard
+    /// XDG-style zsh setup. We drop a symlink named `rtk` here so the
+    /// rewritten command (`rtk git status`, etc.) emitted by
+    /// `rtk hook claude` resolves when Claude Code spawns it. See the
+    /// install path's symlink step for the conflict-handling story.
+    public let userLocalBinDirURL: URL
+    public let userLocalBinSymlinkURL: URL
+
+    /// `~/.open-island/bin/rtk-wrapper.sh` — only present on machines
+    /// upgrading from the pre-fix installer; removed on uninstall.
+    public let legacyWrapperURL: URL
+
+    /// `~/.open-island/rtk-stats.jsonl` — only present on machines
+    /// upgrading from the pre-fix wrapper; removed on uninstall.
+    public let legacyStatsJSONLURL: URL
+
+    /// The exact string we register as Claude Code's PreToolUse hook
+    /// `command`. Claude Code shell-parses this, so the result is the
+    /// equivalent of `bash -c '<binaryURL.path> hook claude'`.
+    public var hookCommand: String {
+        "\(binaryURL.path) \(Self.hookSubcommand)"
+    }
 
     private let fileManager: FileManager
     private let archProvider: @Sendable () -> String
@@ -179,8 +224,12 @@ public final class RTKInstallationManager: @unchecked Sendable {
         self.openIslandBinDirURL = openIslandHomeURL.appendingPathComponent("bin", isDirectory: true)
         self.claudeDirectory = claudeDirectory
         self.binaryURL = openIslandBinDirURL.appendingPathComponent(Self.binaryFileName)
-        self.wrapperURL = openIslandBinDirURL.appendingPathComponent(Self.wrapperFileName)
-        self.statsJSONLURL = openIslandHomeURL.appendingPathComponent(Self.statsFileName)
+        self.userLocalBinDirURL = homeDirectory
+            .appendingPathComponent(".local", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+        self.userLocalBinSymlinkURL = userLocalBinDirURL.appendingPathComponent(Self.binaryFileName)
+        self.legacyWrapperURL = openIslandBinDirURL.appendingPathComponent(Self.legacyWrapperFileName)
+        self.legacyStatsJSONLURL = openIslandHomeURL.appendingPathComponent(Self.legacyStatsJSONLFileName)
         self.pidFileURL = openIslandHomeURL.appendingPathComponent(Self.pidFileName)
         self.settingsURL = claudeDirectory.appendingPathComponent("settings.json")
         self.fileManager = fileManager
@@ -199,33 +248,29 @@ public final class RTKInstallationManager: @unchecked Sendable {
                 arch: arch,
                 rtkVersion: Self.RTK_VERSION,
                 binaryURL: binaryURL,
-                wrapperURL: wrapperURL,
-                statsJSONLURL: statsJSONLURL,
                 pidFileURL: pidFileURL,
                 settingsURL: settingsURL,
                 binaryPresent: false,
                 binaryExecutable: false,
-                wrapperPresent: false,
                 hookConfigured: false
             )
         }
 
         let binaryPresent = fileManager.fileExists(atPath: binaryURL.path)
         let binaryExecutable = binaryPresent && fileManager.isExecutableFile(atPath: binaryURL.path)
-        let wrapperPresent = fileManager.fileExists(atPath: wrapperURL.path)
 
         let settings = try ClaudeSettingsBackupHelper.currentSettings(
             directory: claudeDirectory,
             fileManager: fileManager
         )
-        let hookConfigured = Self.findManagedPreToolUseEntry(in: settings, wrapperPath: wrapperURL.path) != nil
+        let hookConfigured = Self.findManagedPreToolUseEntry(in: settings, hookCommand: hookCommand) != nil
 
         let state: RTKInstallationStatus.State
-        switch (hookConfigured, binaryExecutable, wrapperPresent) {
-        case (false, false, false): state = .notInstalled
-        case (false, _, _): state = .installedDisabled
-        case (true, true, true): state = .installedEnabled
-        default: state = .needsRepair
+        switch (hookConfigured, binaryExecutable) {
+        case (false, false): state = .notInstalled
+        case (false, true): state = .installedDisabled
+        case (true, true): state = .installedEnabled
+        case (true, false): state = .needsRepair
         }
 
         return RTKInstallationStatus(
@@ -233,13 +278,10 @@ public final class RTKInstallationManager: @unchecked Sendable {
             arch: arch,
             rtkVersion: Self.RTK_VERSION,
             binaryURL: binaryURL,
-            wrapperURL: wrapperURL,
-            statsJSONLURL: statsJSONLURL,
             pidFileURL: pidFileURL,
             settingsURL: settingsURL,
             binaryPresent: binaryPresent,
             binaryExecutable: binaryExecutable,
-            wrapperPresent: wrapperPresent,
             hookConfigured: hookConfigured
         )
     }
@@ -313,19 +355,40 @@ public final class RTKInstallationManager: @unchecked Sendable {
                 throw RTKInstallError.binaryNotExecutable
             }
 
-            // 6. Write wrapper script + chmod +x.
-            try Self.wrapperScript().write(to: wrapperURL, atomically: true, encoding: .utf8)
-            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapperURL.path)
-            rollback.append { [fileManager, wrapperURL] in
-                try? fileManager.removeItem(at: wrapperURL)
+            // 6. Symlink ~/.local/bin/rtk → binaryURL.
+            //
+            // WHY this is needed at all (the part future maintainers
+            // are going to wonder about):
+            //
+            // `rtk hook claude` accepts the Claude Code PreToolUse
+            // payload on stdin and emits a hook-protocol JSON whose
+            // `updatedInput.command` is a *relative* `rtk <sub>` string
+            // (e.g. `rtk git status`). Claude Code then spawns that
+            // rewritten command via `$PATH` lookup. RTK 0.38.0 exposes
+            // no env var (`RTK_BIN`/`RTK_PATH`/etc.) to override this
+            // — verified by stringifying the binary — so simply pinning
+            // the hook entry at our absolute path doesn't help: the
+            // *rewritten* command still needs `rtk` discoverable on
+            // PATH. Our install dir `~/.open-island/bin/` isn't on the
+            // default PATH, but `~/.local/bin/` is (zsh standard via
+            // `.zshrc` / `.zprofile`), so a symlink there closes the
+            // loop without us touching PATH or shell rc files.
+            try fileManager.createDirectory(at: userLocalBinDirURL, withIntermediateDirectories: true)
+            try installUserLocalBinSymlink()
+            rollback.append { [self] in
+                try? self.removeUserLocalBinSymlinkIfOurs()
             }
 
-            // 7. Mutate settings.json (helper guarantees backup before write).
+            // 7. Mutate settings.json (helper guarantees backup before
+            // write). The hook command is `<bin> hook claude` — Claude
+            // Code shell-parses the field, so no wrapper script is
+            // needed.
+            let cmd = hookCommand
             try ClaudeSettingsBackupHelper.mutateClaudeSettings(
                 directory: claudeDirectory,
                 fileManager: fileManager
-            ) { [wrapperURL] settings in
-                Self.installPreToolUseEntry(in: &settings, wrapperPath: wrapperURL.path)
+            ) { settings in
+                Self.installPreToolUseEntry(in: &settings, hookCommand: cmd)
             }
             // settings.json rollback uses the most recent backup file.
             rollback.append { [claudeDirectory, fileManager] in
@@ -342,25 +405,135 @@ public final class RTKInstallationManager: @unchecked Sendable {
         return try status()
     }
 
+    /// Three-state symlink reconciliation:
+    /// - Path doesn't exist                          → create symlink
+    /// - Path is a symlink to our binary             → no-op (idempotent)
+    /// - Anything else (regular file, alien symlink) → throw
+    ///   `userLocalBinConflicted` so the UI can surface the conflict
+    ///   verbatim instead of silently overwriting a user-installed
+    ///   `rtk` (Homebrew, cargo, vendored copy).
+    private func installUserLocalBinSymlink() throws {
+        let path = userLocalBinSymlinkURL.path
+        let target = binaryURL.path
+
+        if let existing = inspectUserLocalBinSymlink() {
+            switch existing {
+            case .ours:
+                return  // already correct
+            case let .alienSymlink(dest):
+                throw RTKInstallError.userLocalBinConflicted(
+                    path: path,
+                    kind: "symlink → \(dest)"
+                )
+            case .brokenSymlink:
+                throw RTKInstallError.userLocalBinConflicted(
+                    path: path,
+                    kind: "broken symlink"
+                )
+            case .regularFile:
+                throw RTKInstallError.userLocalBinConflicted(
+                    path: path,
+                    kind: "regular file"
+                )
+            case .other:
+                throw RTKInstallError.userLocalBinConflicted(
+                    path: path,
+                    kind: "non-symlink path"
+                )
+            }
+        }
+
+        try fileManager.createSymbolicLink(
+            atPath: path,
+            withDestinationPath: target
+        )
+    }
+
+    /// Remove the symlink only if it still points at our binary. A
+    /// user who hand-edited it (`ln -sf /elsewhere/rtk ~/.local/bin/rtk`)
+    /// wins — we leave their override intact.
+    private func removeUserLocalBinSymlinkIfOurs() throws {
+        if case .ours = inspectUserLocalBinSymlink() {
+            try fileManager.removeItem(at: userLocalBinSymlinkURL)
+        }
+    }
+
+    private enum UserLocalBinSymlinkState {
+        case ours              // symlink → our binaryURL.path
+        case alienSymlink(destination: String)
+        case brokenSymlink
+        case regularFile
+        case other
+    }
+
+    private func inspectUserLocalBinSymlink() -> UserLocalBinSymlinkState? {
+        let path = userLocalBinSymlinkURL.path
+        // Use lstat-style attribute lookup so we see the symlink itself,
+        // not whatever it points to.
+        guard let attrs = try? fileManager.attributesOfItem(atPath: path) else {
+            return nil  // doesn't exist
+        }
+        let type = attrs[.type] as? FileAttributeType
+        switch type {
+        case .typeSymbolicLink:
+            guard let dest = try? fileManager.destinationOfSymbolicLink(atPath: path) else {
+                return .brokenSymlink
+            }
+            return dest == binaryURL.path ? .ours : .alienSymlink(destination: dest)
+        case .typeRegular:
+            return .regularFile
+        default:
+            return .other
+        }
+    }
+
     /// Reverse install. Returns the manager to `notInstalled` state and
-    /// leaves `~/.claude/settings.json` byte-identical to the pre-install
-    /// snapshot (assuming no other tool wrote to it between).
+    /// leaves `~/.claude/settings.json` JSON-equivalent to the
+    /// pre-install snapshot (assuming no other tool wrote to it
+    /// between). Also removes any leftover artifacts from the pre-fix
+    /// installer (legacy wrapper script + jsonl).
     @discardableResult
     public func uninstall() throws -> RTKInstallationStatus {
         // Remove our PreToolUse hook entry; settings.json is mutated
         // through the helper so a backup of the about-to-be-removed
-        // state is always retained.
+        // state is always retained. We also try to clean any
+        // old-style hook entries that pointed at the legacy wrapper,
+        // so an upgrade-then-uninstall cycle is fully clean.
         let current = try status()
-        if current.hookConfigured {
+        let cmd = hookCommand
+        let legacyCmd = legacyWrapperURL.path
+        let snapshot = try ClaudeSettingsBackupHelper.currentSettings(
+            directory: claudeDirectory,
+            fileManager: fileManager
+        )
+        let hasLegacyHook = Self.findManagedPreToolUseEntry(
+            in: snapshot,
+            hookCommand: legacyCmd
+        ) != nil
+        if current.hookConfigured || hasLegacyHook {
             try ClaudeSettingsBackupHelper.mutateClaudeSettings(
                 directory: claudeDirectory,
                 fileManager: fileManager
-            ) { [wrapperURL] settings in
-                Self.uninstallPreToolUseEntry(in: &settings, wrapperPath: wrapperURL.path)
+            ) { settings in
+                Self.uninstallPreToolUseEntry(in: &settings, hookCommand: cmd)
+                Self.uninstallPreToolUseEntry(in: &settings, hookCommand: legacyCmd)
             }
         }
 
-        for url in [wrapperURL, binaryURL, pidFileURL] where fileManager.fileExists(atPath: url.path) {
+        // Symlink first (only if still ours), then artifacts. Order
+        // matters: removing the binary first would make the symlink
+        // dangling, which `inspectUserLocalBinSymlink` reads as
+        // `brokenSymlink` — and `removeUserLocalBinSymlinkIfOurs`
+        // matches against `.ours` only. Keeping the binary on disk
+        // until after we've validated the symlink keeps the check
+        // unambiguous.
+        try removeUserLocalBinSymlinkIfOurs()
+        for url in [
+            binaryURL,
+            pidFileURL,
+            legacyWrapperURL,
+            legacyStatsJSONLURL,
+        ] where fileManager.fileExists(atPath: url.path) {
             try fileManager.removeItem(at: url)
         }
 
@@ -368,52 +541,84 @@ public final class RTKInstallationManager: @unchecked Sendable {
     }
 
     /// Called by the watchdog when it observes the binary has gone
-    /// missing. Removes the orphaned settings.json hook + wrapper but
-    /// does *not* try to re-download. Idempotent.
+    /// missing. Removes the orphaned settings.json hook entry + any
+    /// leftover legacy artifacts but does *not* try to re-download.
+    /// Idempotent.
     @discardableResult
     public func handleBinaryLoss() throws -> RTKInstallationStatus {
         let current = try status()
-        if current.hookConfigured {
+        let cmd = hookCommand
+        let legacyCmd = legacyWrapperURL.path
+        let snapshot = try ClaudeSettingsBackupHelper.currentSettings(
+            directory: claudeDirectory,
+            fileManager: fileManager
+        )
+        let hasLegacyHook = Self.findManagedPreToolUseEntry(
+            in: snapshot,
+            hookCommand: legacyCmd
+        ) != nil
+        if current.hookConfigured || hasLegacyHook {
             try ClaudeSettingsBackupHelper.mutateClaudeSettings(
                 directory: claudeDirectory,
                 fileManager: fileManager
-            ) { [wrapperURL] settings in
-                Self.uninstallPreToolUseEntry(in: &settings, wrapperPath: wrapperURL.path)
+            ) { settings in
+                Self.uninstallPreToolUseEntry(in: &settings, hookCommand: cmd)
+                Self.uninstallPreToolUseEntry(in: &settings, hookCommand: legacyCmd)
             }
         }
-        for url in [wrapperURL, pidFileURL] where fileManager.fileExists(atPath: url.path) {
+        // Binary is already gone, so a still-existing `~/.local/bin/rtk`
+        // symlink pointing at it is dangling — strip it if it's still
+        // ours (an alien override wins, same as in uninstall).
+        try? removeDanglingUserLocalBinSymlinkIfOurs()
+        for url in [pidFileURL, legacyWrapperURL] where fileManager.fileExists(atPath: url.path) {
             try fileManager.removeItem(at: url)
         }
         return try status()
     }
 
+    /// Variant of `removeUserLocalBinSymlinkIfOurs` for the
+    /// binary-loss path: the binary is already gone, so the symlink
+    /// is necessarily dangling. We still match on `destinationOfSymbolicLink`
+    /// pointing at our `binaryURL.path` (the *target* string survives
+    /// the binary's deletion) before we touch it.
+    private func removeDanglingUserLocalBinSymlinkIfOurs() throws {
+        let path = userLocalBinSymlinkURL.path
+        guard let attrs = try? fileManager.attributesOfItem(atPath: path),
+              (attrs[.type] as? FileAttributeType) == .typeSymbolicLink,
+              let dest = try? fileManager.destinationOfSymbolicLink(atPath: path),
+              dest == binaryURL.path
+        else { return }
+        try fileManager.removeItem(at: userLocalBinSymlinkURL)
+    }
+
     // MARK: settings.json shape
 
-    /// PreToolUse entry that points at `wrapperPath`. Format mirrors what
-    /// Claude Code already accepts elsewhere in the codebase
+    /// PreToolUse entry whose `command` is the literal string passed
+    /// in `hookCommand` (e.g. `<bin>/rtk hook claude`). Format mirrors
+    /// what Claude Code already accepts elsewhere in the codebase
     /// (matcher + hooks array of {type:"command", command:...}).
-    static func managedPreToolUseEntry(wrapperPath: String) -> [String: Any] {
+    static func managedPreToolUseEntry(hookCommand: String) -> [String: Any] {
         [
             "matcher": preToolUseMatcher,
             "hooks": [
                 [
                     "type": "command",
-                    "command": wrapperPath,
+                    "command": hookCommand,
                 ] as [String: Any]
             ],
         ]
     }
 
     /// Find an entry in `settings["hooks"]["PreToolUse"]` whose hooks
-    /// array contains a command matching `wrapperPath`. Returns its
-    /// index in that PreToolUse array, or nil.
-    static func findManagedPreToolUseEntry(in settings: [String: Any], wrapperPath: String) -> Int? {
+    /// array contains a command exactly matching `hookCommand`.
+    /// Returns its index in that PreToolUse array, or nil.
+    static func findManagedPreToolUseEntry(in settings: [String: Any], hookCommand: String) -> Int? {
         guard let hooks = settings["hooks"] as? [String: Any],
               let pre = hooks["PreToolUse"] as? [[String: Any]] else { return nil }
         for (idx, entry) in pre.enumerated() {
             guard let inner = entry["hooks"] as? [[String: Any]] else { continue }
             for h in inner {
-                if let cmd = h["command"] as? String, cmd == wrapperPath {
+                if let cmd = h["command"] as? String, cmd == hookCommand {
                     return idx
                 }
             }
@@ -422,26 +627,26 @@ public final class RTKInstallationManager: @unchecked Sendable {
     }
 
     /// Append our PreToolUse entry; idempotent.
-    static func installPreToolUseEntry(in settings: inout [String: Any], wrapperPath: String) {
+    static func installPreToolUseEntry(in settings: inout [String: Any], hookCommand: String) {
         var hooks = (settings["hooks"] as? [String: Any]) ?? [:]
         var pre = (hooks["PreToolUse"] as? [[String: Any]]) ?? []
-        if findManagedPreToolUseEntry(in: settings, wrapperPath: wrapperPath) != nil {
+        if findManagedPreToolUseEntry(in: settings, hookCommand: hookCommand) != nil {
             return
         }
-        pre.append(managedPreToolUseEntry(wrapperPath: wrapperPath))
+        pre.append(managedPreToolUseEntry(hookCommand: hookCommand))
         hooks["PreToolUse"] = pre
         settings["hooks"] = hooks
     }
 
     /// Remove our PreToolUse entry; clean up empty containers so
-    /// uninstall produces a settings.json byte-identical to the
-    /// pre-install snapshot (when nothing else changed in between).
-    static func uninstallPreToolUseEntry(in settings: inout [String: Any], wrapperPath: String) {
+    /// uninstall produces a settings.json that is JSON-equivalent to
+    /// the pre-install snapshot (when nothing else changed in between).
+    static func uninstallPreToolUseEntry(in settings: inout [String: Any], hookCommand: String) {
         guard var hooks = settings["hooks"] as? [String: Any],
               var pre = hooks["PreToolUse"] as? [[String: Any]] else { return }
         pre.removeAll { entry in
             guard let inner = entry["hooks"] as? [[String: Any]] else { return false }
-            return inner.contains { ($0["command"] as? String) == wrapperPath }
+            return inner.contains { ($0["command"] as? String) == hookCommand }
         }
         if pre.isEmpty {
             hooks.removeValue(forKey: "PreToolUse")
@@ -453,50 +658,6 @@ public final class RTKInstallationManager: @unchecked Sendable {
         } else {
             settings["hooks"] = hooks
         }
-    }
-
-    // MARK: Wrapper script
-
-    /// Bash wrapper installed alongside the rtk binary. Open Island's
-    /// settings.json hook points at *this* — never the binary directly —
-    /// so the wrapper can tee `[rtk] origTok→compTok tokens (N% saved)`
-    /// stderr lines into `rtk-stats.jsonl` for telemetry pickup, while
-    /// keeping rtk's stdout (the actual hook protocol JSON) 100%
-    /// transparent. Failure mode is silent: if the binary is gone the
-    /// wrapper exits 0 (= "no rewrite, pass through"), so Claude Code
-    /// keeps working unchanged.
-    public static func wrapperScript() -> String {
-        // Bash quirk: the obvious `case "$line" in \[rtk\]*) ... ;; esac`
-        // form mis-parses inside `2> >(...)` process substitution
-        // (`bash -n` flags `;;` as an unexpected token). Use `[[ ==
-        // glob ]]` instead — semantically equivalent and parses cleanly.
-        // Sed delimiters are `:` (not the usual `/`) so we don't fight
-        // bash escaping of backslash-quote sequences.
-        #"""
-        #!/bin/bash
-        # Open Island RTK wrapper — managed file, do not edit by hand.
-        # Stdout (RTK hook protocol JSON) is 100% transparent.
-        # Stderr lines starting with "[rtk]" are mirrored to
-        # ~/.open-island/rtk-stats.jsonl for telemetry, then forwarded.
-        # If the rtk binary is missing, this script exits 0 silently —
-        # Claude Code reads that as "PreToolUse approved, no rewrite",
-        # so the user's workflow keeps working.
-        set -u
-        RTK_BIN="${HOME}/.open-island/bin/rtk"
-        RTK_STATS="${HOME}/.open-island/rtk-stats.jsonl"
-        if [ ! -x "$RTK_BIN" ]; then
-            exit 0
-        fi
-        "$RTK_BIN" "$@" 2> >(
-            while IFS= read -r _line; do
-                printf '%s\n' "$_line" >&2
-                if [[ "$_line" == \[rtk\]* ]]; then
-                    _esc=$(printf '%s' "$_line" | /usr/bin/sed -e 's:\\:\\\\:g' -e 's:":\\":g')
-                    printf '{"ts":%d,"raw":"%s"}\n' "$(date +%s)" "$_esc" >> "$RTK_STATS" 2>/dev/null
-                fi
-            done
-        )
-        """#
     }
 
     // MARK: Architecture detection

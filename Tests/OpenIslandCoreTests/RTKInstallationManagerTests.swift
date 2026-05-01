@@ -95,7 +95,7 @@ struct RTKInstallationManagerTests {
     // MARK: - Install / uninstall round-trip
 
     @Test
-    func installPlacesBinaryAndWrapperAndConfiguresHook() async throws {
+    func installPlacesBinaryAndConfiguresHookCommand() async throws {
         let root = try Self.makeTempRoot()
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -110,10 +110,21 @@ struct RTKInstallationManagerTests {
 
         #expect(status.state == .installedEnabled)
         #expect(FileManager.default.isExecutableFile(atPath: mgr.binaryURL.path))
-        #expect(FileManager.default.isExecutableFile(atPath: mgr.wrapperURL.path))
         #expect(status.hookConfigured)
+        // No wrapper script: post-fix installer points hook directly
+        // at the binary.
+        #expect(!FileManager.default.fileExists(atPath: mgr.legacyWrapperURL.path))
+        // No legacy jsonl either.
+        #expect(!FileManager.default.fileExists(atPath: mgr.legacyStatsJSONLURL.path))
 
-        // settings.json contains our PreToolUse entry pointing at the wrapper.
+        // ~/.local/bin/rtk symlink is in place and points at our binary.
+        let symAttrs = try FileManager.default.attributesOfItem(atPath: mgr.userLocalBinSymlinkURL.path)
+        #expect((symAttrs[.type] as? FileAttributeType) == .typeSymbolicLink)
+        let dest = try FileManager.default.destinationOfSymbolicLink(atPath: mgr.userLocalBinSymlinkURL.path)
+        #expect(dest == mgr.binaryURL.path)
+
+        // settings.json contains our PreToolUse entry whose command is
+        // exactly `<binary> hook claude`.
         let settings = try ClaudeSettingsBackupHelper.currentSettings(
             directory: mgr.claudeDirectory
         )
@@ -121,8 +132,10 @@ struct RTKInstallationManagerTests {
         let pre = try #require(hooks["PreToolUse"] as? [[String: Any]])
         #expect(pre.contains { entry in
             guard let inner = entry["hooks"] as? [[String: Any]] else { return false }
-            return inner.contains { ($0["command"] as? String) == mgr.wrapperURL.path }
+            return inner.contains { ($0["command"] as? String) == mgr.hookCommand }
         })
+        #expect(mgr.hookCommand.hasSuffix(" hook claude"))
+        #expect(mgr.hookCommand.hasPrefix(mgr.binaryURL.path))
     }
 
     /// install → uninstall round trip preserves semantics + no RTK
@@ -168,7 +181,6 @@ struct RTKInstallationManagerTests {
         let preObj = preInstall as NSDictionary
         #expect(postObj == preObj)
         #expect(!FileManager.default.fileExists(atPath: mgr.binaryURL.path))
-        #expect(!FileManager.default.fileExists(atPath: mgr.wrapperURL.path))
     }
 
     /// Real-world fixture: a settings.json written by Claude Code itself
@@ -232,7 +244,7 @@ struct RTKInstallationManagerTests {
         #expect((after["theme"] as? String) == "light")
 
         // hooks.PreToolUse: the unrelated /some/other/hook entry survives,
-        // RTK's wrapper-pointing entry is gone.
+        // RTK's `<bin> hook claude`-pointing entry is gone.
         let pre = (after["hooks"] as? [String: Any])?["PreToolUse"] as? [[String: Any]]
         #expect(pre?.count == 1)
         let preserved = pre?.first
@@ -260,7 +272,6 @@ struct RTKInstallationManagerTests {
 
         // No artifacts left behind.
         #expect(!FileManager.default.fileExists(atPath: mgr.binaryURL.path))
-        #expect(!FileManager.default.fileExists(atPath: mgr.wrapperURL.path))
         let status = try mgr.status()
         #expect(status.state == .notInstalled)
     }
@@ -295,7 +306,6 @@ struct RTKInstallationManagerTests {
         let post = try mgr.status()
         #expect(!post.hookConfigured)
         #expect(post.state == .notInstalled)
-        #expect(!FileManager.default.fileExists(atPath: mgr.wrapperURL.path))
     }
 
     @Test
@@ -313,41 +323,299 @@ struct RTKInstallationManagerTests {
         _ = try mgr.handleBinaryLoss()
     }
 
-    // MARK: - Wrapper script invariants
+    // MARK: - Hook command schema (post-fix: no wrapper script)
 
     @Test
-    func wrapperScriptContainsRequiredElements() {
-        let s = RTKInstallationManager.wrapperScript()
-        #expect(s.hasPrefix("#!/bin/bash"))
-        #expect(s.contains("RTK_BIN=\"${HOME}/.open-island/bin/rtk\""))
-        #expect(s.contains("RTK_STATS=\"${HOME}/.open-island/rtk-stats.jsonl\""))
-        // Fail-open behavior: missing binary → exit 0.
-        #expect(s.contains("if [ ! -x \"$RTK_BIN\" ]; then"))
-        #expect(s.contains("exit 0"))
-        // [rtk] line capture.
-        #expect(s.contains("[rtk]"))
-        #expect(s.contains("rtk-stats.jsonl") || s.contains("$RTK_STATS"))
+    func hookCommandSchema() {
+        let mgr = RTKInstallationManager(
+            homeDirectory: URL(fileURLWithPath: "/tmp/fakehome"),
+            archProvider: { "arm64" }
+        )
+        // Exact shape contract: `<binaryURL.path> hook claude`.
+        #expect(mgr.hookCommand == "/tmp/fakehome/.open-island/bin/rtk hook claude")
     }
 
-    /// The wrapper must actually run — no syntax errors. Spawn `bash -n`
-    /// (parse-only) on the script to catch typos before they ship.
+    // MARK: - Legacy artifact cleanup (upgrade from pre-fix installer)
+
     @Test
-    func wrapperScriptParsesCleanlyInBash() throws {
+    func uninstallRemovesLegacyJSONLIfPresent() async throws {
         let root = try Self.makeTempRoot()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let scriptURL = root.appendingPathComponent("rtk-wrapper.sh")
-        try RTKInstallationManager.wrapperScript().write(to: scriptURL, atomically: true, encoding: .utf8)
+        let (tarball, hex) = try Self.makeFakeTarball(in: root)
+        let mgr = Self.makeManager(
+            in: root,
+            downloader: { _ in tarball },
+            expectedSHA: hex
+        )
 
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/bash")
-        proc.arguments = ["-n", scriptURL.path]
-        let stderr = Pipe()
-        proc.standardError = stderr
-        try proc.run()
-        proc.waitUntilExit()
-        let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        #expect(proc.terminationStatus == 0, "bash -n failed: \(err)")
+        // Simulate a leftover from the pre-fix wrapper.
+        try FileManager.default.createDirectory(
+            at: mgr.openIslandHomeURL,
+            withIntermediateDirectories: true
+        )
+        try Data("{\"ts\":1,\"raw\":\"[rtk] legacy line\"}\n".utf8)
+            .write(to: mgr.legacyStatsJSONLURL)
+
+        _ = try await mgr.install()
+        _ = try mgr.uninstall()
+
+        #expect(!FileManager.default.fileExists(atPath: mgr.legacyStatsJSONLURL.path))
+    }
+
+    @Test
+    func uninstallRemovesLegacyWrapperAndItsHookEntryIfPresent() async throws {
+        let root = try Self.makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (tarball, hex) = try Self.makeFakeTarball(in: root)
+        let mgr = Self.makeManager(
+            in: root,
+            downloader: { _ in tarball },
+            expectedSHA: hex
+        )
+
+        // Simulate machine that previously had wrapper installed:
+        //   1. A leftover wrapper script on disk
+        //   2. settings.json contains a PreToolUse entry pointing at it
+        try FileManager.default.createDirectory(
+            at: mgr.openIslandBinDirURL,
+            withIntermediateDirectories: true
+        )
+        try Data("#!/bin/bash\nexit 0\n".utf8).write(to: mgr.legacyWrapperURL)
+        var seedSettings: [String: Any] = [:]
+        RTKInstallationManager.installPreToolUseEntry(
+            in: &seedSettings,
+            hookCommand: mgr.legacyWrapperURL.path
+        )
+        try ClaudeSettingsBackupHelper.serializeSettings(seedSettings)
+            .write(to: mgr.settingsURL)
+
+        // Uninstall on its own (no fresh install) should clean both.
+        _ = try mgr.uninstall()
+
+        #expect(!FileManager.default.fileExists(atPath: mgr.legacyWrapperURL.path))
+        let after = try ClaudeSettingsBackupHelper.currentSettings(directory: mgr.claudeDirectory)
+        let pre = (after["hooks"] as? [String: Any])?["PreToolUse"] as? [[String: Any]]
+        // The PreToolUse list (if any) must not contain the legacy wrapper anymore.
+        #expect(pre?.allSatisfy { entry in
+            guard let inner = entry["hooks"] as? [[String: Any]] else { return true }
+            return inner.allSatisfy { ($0["command"] as? String) != mgr.legacyWrapperURL.path }
+        } ?? true)
+    }
+
+    @Test
+    func installDoesNotCreateLegacyJSONL() async throws {
+        let root = try Self.makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (tarball, hex) = try Self.makeFakeTarball(in: root)
+        let mgr = Self.makeManager(
+            in: root,
+            downloader: { _ in tarball },
+            expectedSHA: hex
+        )
+
+        _ = try await mgr.install()
+
+        // Post-fix install path must never write rtk-stats.jsonl —
+        // telemetry now flows through `rtk gain --format json`, not
+        // wrapper-tee'd stderr.
+        #expect(!FileManager.default.fileExists(atPath: mgr.legacyStatsJSONLURL.path))
+    }
+
+    // MARK: - ~/.local/bin/rtk symlink (PATH-bridging)
+
+    /// Re-running install on a system that already has our exact
+    /// symlink should not throw and should not double-create. (The
+    /// outer install gate would normally reject `alreadyInstalled`,
+    /// so we drive the symlink helper directly to keep this test
+    /// scoped to its three-state contract.)
+    @Test
+    func userLocalBinSymlinkIsIdempotentWhenAlreadyOurs() async throws {
+        let root = try Self.makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (tarball, hex) = try Self.makeFakeTarball(in: root)
+        let mgr = Self.makeManager(
+            in: root,
+            downloader: { _ in tarball },
+            expectedSHA: hex
+        )
+
+        _ = try await mgr.install()
+        let firstDest = try FileManager.default.destinationOfSymbolicLink(
+            atPath: mgr.userLocalBinSymlinkURL.path
+        )
+
+        // Uninstall + reinstall — symlink should be restored to the
+        // same target without triggering a clobber.
+        _ = try mgr.uninstall()
+        _ = try await mgr.install()
+
+        let secondDest = try FileManager.default.destinationOfSymbolicLink(
+            atPath: mgr.userLocalBinSymlinkURL.path
+        )
+        #expect(firstDest == secondDest)
+        #expect(secondDest == mgr.binaryURL.path)
+    }
+
+    @Test
+    func installRefusesToClobberRegularFileAtUserLocalBinPath() async throws {
+        let root = try Self.makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (tarball, hex) = try Self.makeFakeTarball(in: root)
+        let mgr = Self.makeManager(
+            in: root,
+            downloader: { _ in tarball },
+            expectedSHA: hex
+        )
+
+        // Plant a user-installed regular file (e.g. brew/cargo result).
+        try FileManager.default.createDirectory(
+            at: mgr.userLocalBinDirURL,
+            withIntermediateDirectories: true
+        )
+        try Data("not a symlink".utf8).write(to: mgr.userLocalBinSymlinkURL)
+        let beforeBytes = try Data(contentsOf: mgr.userLocalBinSymlinkURL)
+
+        await #expect(throws: RTKInstallError.self) {
+            _ = try await mgr.install()
+        }
+
+        // Refuse-clobber: the file at ~/.local/bin/rtk is unchanged,
+        // and earlier-step artifacts (binary, settings.json hook
+        // entry) must have been rolled back.
+        #expect(try Data(contentsOf: mgr.userLocalBinSymlinkURL) == beforeBytes)
+        #expect(!FileManager.default.fileExists(atPath: mgr.binaryURL.path))
+        let status = try mgr.status()
+        #expect(status.state == .notInstalled)
+        #expect(!status.hookConfigured)
+    }
+
+    @Test
+    func installRefusesToClobberAlienSymlinkAtUserLocalBinPath() async throws {
+        let root = try Self.makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (tarball, hex) = try Self.makeFakeTarball(in: root)
+        let mgr = Self.makeManager(
+            in: root,
+            downloader: { _ in tarball },
+            expectedSHA: hex
+        )
+
+        // Plant an alien symlink (user has rtk pinned to a different path).
+        try FileManager.default.createDirectory(
+            at: mgr.userLocalBinDirURL,
+            withIntermediateDirectories: true
+        )
+        let alienTarget = "/usr/local/bin/rtk"
+        try FileManager.default.createSymbolicLink(
+            atPath: mgr.userLocalBinSymlinkURL.path,
+            withDestinationPath: alienTarget
+        )
+
+        await #expect(throws: RTKInstallError.self) {
+            _ = try await mgr.install()
+        }
+
+        // Alien symlink survives unchanged.
+        let dest = try FileManager.default.destinationOfSymbolicLink(
+            atPath: mgr.userLocalBinSymlinkURL.path
+        )
+        #expect(dest == alienTarget)
+    }
+
+    @Test
+    func uninstallLeavesAlienSymlinkAlone() async throws {
+        let root = try Self.makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (tarball, hex) = try Self.makeFakeTarball(in: root)
+        let mgr = Self.makeManager(
+            in: root,
+            downloader: { _ in tarball },
+            expectedSHA: hex
+        )
+
+        _ = try await mgr.install()
+
+        // Simulate user repointing the symlink mid-life.
+        try FileManager.default.removeItem(at: mgr.userLocalBinSymlinkURL)
+        let alienTarget = "/opt/homebrew/bin/rtk"
+        try FileManager.default.createSymbolicLink(
+            atPath: mgr.userLocalBinSymlinkURL.path,
+            withDestinationPath: alienTarget
+        )
+
+        _ = try mgr.uninstall()
+
+        // We don't touch user's override.
+        #expect(FileManager.default.fileExists(atPath: mgr.userLocalBinSymlinkURL.path)
+                || (try? FileManager.default.attributesOfItem(atPath: mgr.userLocalBinSymlinkURL.path)) != nil)
+        let dest = try FileManager.default.destinationOfSymbolicLink(
+            atPath: mgr.userLocalBinSymlinkURL.path
+        )
+        #expect(dest == alienTarget)
+
+        // But our binary IS gone.
+        #expect(!FileManager.default.fileExists(atPath: mgr.binaryURL.path))
+    }
+
+    @Test
+    func uninstallRemovesOurOwnSymlink() async throws {
+        let root = try Self.makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (tarball, hex) = try Self.makeFakeTarball(in: root)
+        let mgr = Self.makeManager(
+            in: root,
+            downloader: { _ in tarball },
+            expectedSHA: hex
+        )
+
+        _ = try await mgr.install()
+        #expect((try? FileManager.default.attributesOfItem(
+            atPath: mgr.userLocalBinSymlinkURL.path
+        )) != nil)
+
+        _ = try mgr.uninstall()
+
+        // attributesOfItem on a missing path throws — that's the signal.
+        let attrs = try? FileManager.default.attributesOfItem(
+            atPath: mgr.userLocalBinSymlinkURL.path
+        )
+        #expect(attrs == nil)
+    }
+
+    @Test
+    func handleBinaryLossRemovesDanglingOurSymlink() async throws {
+        let root = try Self.makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (tarball, hex) = try Self.makeFakeTarball(in: root)
+        let mgr = Self.makeManager(
+            in: root,
+            downloader: { _ in tarball },
+            expectedSHA: hex
+        )
+
+        _ = try await mgr.install()
+        // User rm's the binary out from under us.
+        try FileManager.default.removeItem(at: mgr.binaryURL)
+        // Symlink is still on disk but now dangling.
+
+        _ = try mgr.handleBinaryLoss()
+
+        // Our dangling symlink is reaped (target string still matched
+        // binaryURL.path), but we'd leave alien/repointed symlinks
+        // alone (covered separately in uninstallLeavesAlienSymlinkAlone).
+        let attrs = try? FileManager.default.attributesOfItem(
+            atPath: mgr.userLocalBinSymlinkURL.path
+        )
+        #expect(attrs == nil)
     }
 
     // MARK: - settings.json shape helpers
@@ -355,8 +623,14 @@ struct RTKInstallationManagerTests {
     @Test
     func installPreToolUseEntryIsIdempotent() {
         var settings: [String: Any] = [:]
-        RTKInstallationManager.installPreToolUseEntry(in: &settings, wrapperPath: "/path/to/rtk-wrapper.sh")
-        RTKInstallationManager.installPreToolUseEntry(in: &settings, wrapperPath: "/path/to/rtk-wrapper.sh")
+        RTKInstallationManager.installPreToolUseEntry(
+            in: &settings,
+            hookCommand: "/path/to/rtk hook claude"
+        )
+        RTKInstallationManager.installPreToolUseEntry(
+            in: &settings,
+            hookCommand: "/path/to/rtk hook claude"
+        )
 
         let hooks = settings["hooks"] as? [String: Any]
         let pre = hooks?["PreToolUse"] as? [[String: Any]]
@@ -366,8 +640,14 @@ struct RTKInstallationManagerTests {
     @Test
     func uninstallPreToolUseEntryRemovesEmptyContainers() {
         var settings: [String: Any] = [:]
-        RTKInstallationManager.installPreToolUseEntry(in: &settings, wrapperPath: "/path/to/rtk-wrapper.sh")
-        RTKInstallationManager.uninstallPreToolUseEntry(in: &settings, wrapperPath: "/path/to/rtk-wrapper.sh")
+        RTKInstallationManager.installPreToolUseEntry(
+            in: &settings,
+            hookCommand: "/path/to/rtk hook claude"
+        )
+        RTKInstallationManager.uninstallPreToolUseEntry(
+            in: &settings,
+            hookCommand: "/path/to/rtk hook claude"
+        )
         #expect(settings["hooks"] == nil)
     }
 
@@ -380,8 +660,14 @@ struct RTKInstallationManagerTests {
                 ]
             ]
         ]
-        RTKInstallationManager.installPreToolUseEntry(in: &settings, wrapperPath: "/path/to/rtk-wrapper.sh")
-        RTKInstallationManager.uninstallPreToolUseEntry(in: &settings, wrapperPath: "/path/to/rtk-wrapper.sh")
+        RTKInstallationManager.installPreToolUseEntry(
+            in: &settings,
+            hookCommand: "/path/to/rtk hook claude"
+        )
+        RTKInstallationManager.uninstallPreToolUseEntry(
+            in: &settings,
+            hookCommand: "/path/to/rtk hook claude"
+        )
 
         let pre = (settings["hooks"] as? [String: Any])?["PreToolUse"] as? [[String: Any]]
         #expect(pre?.count == 1)
