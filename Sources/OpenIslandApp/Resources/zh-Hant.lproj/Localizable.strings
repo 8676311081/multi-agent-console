@@ -261,6 +261,7 @@
 "settings.llmSpend.stats.cardSavedByCompression" = "壓縮節省";
 "settings.llmSpend.stats.savedByCompressionTooltip" = "RTK 跨所有 AI 編碼用戶端從 Bash 輸出中剝除的累計 tokens。資料來源 rtk gain。";
 "settings.llmSpend.stats.savedByCompressionUnavailable" = "安裝 RTK 後開始追蹤壓縮節省。";
+"settings.llmSpend.stats.unit.tokens" = "tokens";
 "settings.llmSpend.compression.title" = "壓縮 (RTK)";
 "settings.llmSpend.compression.subtitle" = "在 Bash 工具輸出送進模型前剝除雜訊。跨用戶端，以 Claude Code PreToolUse hook 執行。";
 "settings.llmSpend.compression.statusNotInstalled" = "未安裝";

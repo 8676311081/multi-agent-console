@@ -277,7 +277,7 @@ struct LLMSpendStatsView: View {
             statCard(
                 label: lang.t("settings.llmSpend.stats.cardSavedByCompression"),
                 value: compression.map { formattedTokens($0.totalSavedTokens) } ?? "—",
-                unit: compression == nil ? nil : "tokens",
+                unit: compression == nil ? nil : lang.t("settings.llmSpend.stats.unit.tokens"),
                 emphasis: compression == nil ? .secondary : nil,
                 tooltip: compression == nil
                     ? lang.t("settings.llmSpend.stats.savedByCompressionUnavailable")
