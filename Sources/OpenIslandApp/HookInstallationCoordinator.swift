@@ -80,23 +80,29 @@ final class HookInstallationCoordinator {
         ClaudeStatusLineInstallationManager()
     }
 
-    /// Computed so it always reflects the latest `ClaudeConfigDirectory` setting.
-    private var rtkInstallationManager: RTKInstallationManager {
-        RTKInstallationManager()
-    }
-
-    /// Watchdog is created lazily on `installRtk()` and torn down on
-    /// `uninstallRtk()` / `stopRtkWatchdog()`. Storing it on the
-    /// coordinator (single owner) so app-quit cleanup is straightforward.
+    /// Stored (not computed) so tests can inject a temp-rooted manager
+    /// to exercise `ensureRtkRuntimeWired()` / `refreshRtkStatus()`
+    /// against a fake-installed RTK without touching real disk state.
+    /// Production code constructs the default lazily on init below.
     @ObservationIgnored
-    private var rtkWatchdog: RTKWatchdog?
+    var rtkInstallationManager: RTKInstallationManager = RTKInstallationManager()
 
-    /// Telemetry reader, lifecycle-twinned with the watchdog.
-    /// Created on install, polls `<bin> gain --format json` every
+    /// Watchdog is created lazily on `installRtk()` (or on cold-start
+    /// via `ensureRtkRuntimeWired()`) and torn down on `uninstallRtk()`
+    /// / `stopRtkWatchdog()`. Storing it on the coordinator (single
+    /// owner) so app-quit cleanup is straightforward. `internal` rather
+    /// than `private` so `@testable import OpenIslandApp` can assert
+    /// `isRunning` without adding test-only shims.
+    @ObservationIgnored
+    var rtkWatchdog: RTKWatchdog?
+
+    /// Telemetry reader, lifecycle-twinned with the watchdog. Created
+    /// on install / cold-start, polls `<bin> gain --format json` every
     /// 60 s and pushes results into `llmStatsStore`. Torn down on
-    /// uninstall / app-quit.
+    /// uninstall / app-quit. `internal` for the same test-visibility
+    /// reason as `rtkWatchdog`.
     @ObservationIgnored
-    private var rtkTelemetryReader: RTKTelemetryReader?
+    var rtkTelemetryReader: RTKTelemetryReader?
 
     /// Injected by `AppModel` at init so `installRtk()` can wire the
     /// telemetry reader to the same `LLMStatsStore` that
@@ -1137,10 +1143,59 @@ final class HookInstallationCoordinator {
 
     // MARK: - RTK (token-compression PreToolUse hook)
 
-    /// Refresh `rtkStatus` from disk. Cheap (no network). Safe to call
-    /// from anywhere; does not start the watchdog.
+    /// Refresh `rtkStatus` from disk and ensure the watchdog +
+    /// telemetry reader are running if the resulting state is
+    /// `.installedEnabled`. Cheap (no network). Safe to call from
+    /// anywhere — `ensureRtkRuntimeWired()` is idempotent.
     func refreshRtkStatus() {
         rtkStatus = try? rtkInstallationManager.status()
+        ensureRtkRuntimeWired()
+    }
+
+    /// Single wiring point for the RTK watchdog + telemetry reader.
+    /// **All paths that should leave RTK actively polling MUST call
+    /// this helper** — direct invocations of `RTKWatchdog.start()` /
+    /// `RTKTelemetryReader.start()` from elsewhere in the coordinator
+    /// are forbidden, because they would bypass the single gate that
+    /// future changes (cadence config, telemetry-upload toggle, extra
+    /// runtime side-effects) need to flow through.
+    ///
+    /// Currently invoked from three lifecycle points:
+    ///   1. `installRtk()` success (initial wiring after first install)
+    ///   2. `refreshRtkStatus()` (covers UI pane re-entry + AppModel
+    ///      cold-start path which calls refresh once at init)
+    ///   3. ... and any future event that updates `rtkStatus`
+    ///
+    /// Idempotent: if the watchdog/reader already exist they keep
+    /// running; if `rtkStatus.state` is not `.installedEnabled` this
+    /// is a no-op. `RTKWatchdog.start()` and `RTKTelemetryReader
+    /// .start()` themselves also `guard task == nil`, so even a
+    /// caller that re-creates a fresh helper is safe.
+    func ensureRtkRuntimeWired() {
+        guard rtkStatus?.state == .installedEnabled else { return }
+        let manager = rtkInstallationManager
+        if rtkWatchdog == nil {
+            let watchdog = RTKWatchdog(manager: manager)
+            rtkWatchdog = watchdog
+            watchdog.start()
+        }
+        if rtkTelemetryReader == nil, let store = llmStatsStore {
+            let reader = RTKTelemetryReader(
+                manager: manager,
+                store: store,
+                onWarning: { [weak self] msg in
+                    // Bounce back to the main actor so UI status
+                    // banner can render the warning verbatim. Reader
+                    // fires this off a detached background Task; capture
+                    // self weakly so the closure is Sendable.
+                    Task { @MainActor in
+                        self?.onStatusMessage?(msg)
+                    }
+                }
+            )
+            rtkTelemetryReader = reader
+            reader.start()
+        }
     }
 
     /// Download + install RTK and arm the watchdog + telemetry
@@ -1154,27 +1209,7 @@ final class HookInstallationCoordinator {
             let status = try await manager.install()
             rtkStatus = status
             if status.state == .installedEnabled {
-                let watchdog = RTKWatchdog(manager: manager)
-                watchdog.start()
-                rtkWatchdog = watchdog
-                if let store = llmStatsStore {
-                    let reader = RTKTelemetryReader(
-                        manager: manager,
-                        store: store,
-                        onWarning: { [weak self] msg in
-                            // Bounce back to the main actor so UI
-                            // status banner can render the warning
-                            // verbatim. Reader fires this off a
-                            // detached background Task; capture self
-                            // weakly so the closure is Sendable.
-                            Task { @MainActor in
-                                self?.onStatusMessage?(msg)
-                            }
-                        }
-                    )
-                    reader.start()
-                    rtkTelemetryReader = reader
-                }
+                ensureRtkRuntimeWired()
                 onStatusMessage?("RTK \(status.rtkVersion) installed.")
             }
         } catch {

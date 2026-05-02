@@ -40,6 +40,14 @@ public final class RTKWatchdog: @unchecked Sendable {
         return task != nil
     }
 
+    /// Idempotent. Spawns the periodic tick task and writes a pid file.
+    ///
+    /// **Lifecycle gate:** App-side callers MUST go through
+    /// `HookInstallationCoordinator.ensureRtkRuntimeWired()` rather
+    /// than calling `start()` directly, so cold-start / status-refresh
+    /// / install-success share a single wiring point. Calling `start()`
+    /// directly bypasses that gate; `public` here is a cross-module
+    /// access necessity, not an invitation.
     public func start() {
         lock.lock(); defer { lock.unlock() }
         guard task == nil else { return }

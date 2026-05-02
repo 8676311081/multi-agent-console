@@ -76,6 +76,15 @@ public final class RTKTelemetryReader: @unchecked Sendable {
     /// immediately, then on the configured cadence. The first tick
     /// is synchronous-ish (still off the main thread, but no sleep
     /// before it) so UI has data without a 60-second initial blank.
+    ///
+    /// **Lifecycle gate:** App-side callers MUST go through
+    /// `HookInstallationCoordinator.ensureRtkRuntimeWired()` rather
+    /// than calling `start()` directly, so all wiring (cold start /
+    /// status refresh / install success) shares a single gate.
+    /// Calling `start()` directly from outside that helper is the
+    /// reason the polling silently dropped after each app restart
+    /// before commit (see `rtk-polling-diagnosis.md`). `public` here
+    /// is a cross-module access necessity, not an invitation.
     public func start() {
         lock.lock(); defer { lock.unlock() }
         guard task == nil else { return }

@@ -557,6 +557,15 @@ final class AppModel {
         hooks.onStatusMessage = { [weak self] message in
             self?.lastActionMessage = message
         }
+        // Cold-start RTK runtime wiring. Without this, the telemetry
+        // reader + watchdog only get armed by user-initiated install
+        // (HookInstallationCoordinator.installRtk), which means every
+        // app restart leaves them dormant even though disk state
+        // shows installedEnabled — `compressionSummary` would then
+        // freeze at the install timestamp's value forever. This
+        // single call routes through `ensureRtkRuntimeWired()`,
+        // which is idempotent and gated on actual install state.
+        hooks.refreshRtkStatus()
 
         discovery.syntheticClaudeSessionPrefix = Self.syntheticClaudeSessionPrefix
         discovery.onStatusMessage = { [weak self] message in

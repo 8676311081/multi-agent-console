@@ -323,6 +323,26 @@ struct RTKInstallationManagerTests {
         _ = try mgr.handleBinaryLoss()
     }
 
+    @Test
+    func watchdogStartIsIdempotent() async throws {
+        let root = try Self.makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let mgr = Self.makeManager(
+            in: root,
+            downloader: { _ in URL(fileURLWithPath: "/dev/null") },
+            expectedSHA: "deadbeef"
+        )
+        // Long tick interval so the loop doesn't actually fire mid-test —
+        // we only care that start() doesn't spawn a second background Task.
+        let watchdog = RTKWatchdog(manager: mgr, tickInterval: 3600)
+        watchdog.start()
+        watchdog.start()  // second call must be a no-op (guard task == nil)
+        #expect(watchdog.isRunning)
+        watchdog.stop()
+        #expect(!watchdog.isRunning)
+    }
+
     // MARK: - Hook command schema (post-fix: no wrapper script)
 
     @Test
