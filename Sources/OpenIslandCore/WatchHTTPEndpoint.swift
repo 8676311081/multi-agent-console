@@ -113,15 +113,16 @@ public typealias WatchActiveSessionCountProvider = @Sendable () -> Int
 public final class WatchHTTPEndpoint: @unchecked Sendable {
     private static let logger = Logger(subsystem: "app.openisland", category: "WatchHTTPEndpoint")
     private static let serviceType = "_openisland._tcp"
-    private static let pairingCodeLength = 4
+    private static let pairingCodeLength = 6
     private static let pairingCodeExpiry: TimeInterval = 120 // 2 minutes
+    private static let tokenExpiry: TimeInterval = 3600 // 1 hour
 
     private let queue = DispatchQueue(label: "app.openisland.watch.http", qos: .userInitiated)
 
     // Pairing state
     private var currentPairingCode: String = ""
     private var pairingCodeGeneratedAt: Date = .distantPast
-    private var validTokens: Set<String> = []
+    private var validTokens: [String: Date] = [:]
 
     // SSE connections
     private var sseConnections: [UUID: NWConnection] = [:]
@@ -210,7 +211,7 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
 
             // Bonjour advertising
             listener.service = NWListener.Service(
-                name: Host.current().localizedName ?? "Mac",
+                name: "Open Island",
                 type: Self.serviceType
             )
 
@@ -323,7 +324,7 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
 
         // Generate token
         let token = UUID().uuidString
-        validTokens.insert(token)
+        validTokens[token] = Date().addingTimeInterval(Self.tokenExpiry)
 
         // Regenerate pairing code after successful pair
         regeneratePairingCodeUnsafe()
@@ -441,7 +442,14 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
             return false
         }
         let token = String(auth.dropFirst("Bearer ".count))
-        return validTokens.contains(token)
+        guard let expiry = validTokens[token] else {
+            return false
+        }
+        if Date() > expiry {
+            validTokens.removeValue(forKey: token)
+            return false
+        }
+        return true
     }
 
     // MARK: - Private: HTTP Helpers

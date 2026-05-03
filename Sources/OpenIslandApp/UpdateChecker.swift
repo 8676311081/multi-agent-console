@@ -71,7 +71,11 @@ final class UpdateChecker: NSObject {
 
 extension UpdateChecker: SPUUpdaterDelegate {
     nonisolated func allowedChannels(for updater: SPUUpdater) -> Set<String> {
-        Set()
+        ["release"]
+    }
+
+    nonisolated func feedURLString(for updater: SPUUpdater) -> String? {
+        "https://github.com/Octane0411/open-vibe-island/releases/download/latest/appcast.xml"
     }
 
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
