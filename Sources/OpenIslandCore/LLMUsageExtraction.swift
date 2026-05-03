@@ -181,6 +181,25 @@ public enum AnthropicNonStreaming {
     }
 }
 
+// MARK: - OpenAI / DeepSeek cache-hit field shim
+
+/// OpenAI's standard exposes cache hits at `usage.prompt_tokens_details.cached_tokens`.
+/// DeepSeek's API (compatible with OpenAI but not identical) exposes the
+/// same signal at top-level `usage.prompt_cache_hit_tokens` instead, with
+/// `prompt_cache_miss_tokens` as a sibling. Without this shim DeepSeek
+/// always shows zero cache hits in the spend stats table even when the
+/// model legitimately served cached tokens. Fall back through both shapes.
+private func openAIStyleCacheReadTokens(from usage: [String: Any], detailsKey: String) -> Int {
+    if let details = usage[detailsKey] as? [String: Any],
+       let cached = details["cached_tokens"] as? Int {
+        return cached
+    }
+    if let deepseek = usage["prompt_cache_hit_tokens"] as? Int {
+        return deepseek
+    }
+    return 0
+}
+
 // MARK: - OpenAI chat/completions
 
 /// Side-effects extracted from a single OpenAI chat/completions stream
@@ -216,7 +235,7 @@ public struct OpenAIStreamConsumer: Sendable {
         if let usage = json["usage"] as? [String: Any] {
             let input = usage["prompt_tokens"] as? Int ?? 0
             let output = usage["completion_tokens"] as? Int ?? 0
-            let cacheRead = (usage["prompt_tokens_details"] as? [String: Any])?["cached_tokens"] as? Int ?? 0
+            let cacheRead = openAIStyleCacheReadTokens(from: usage, detailsKey: "prompt_tokens_details")
             effects.append(.usageFinal(input: input, cacheRead: cacheRead, output: output))
         }
 
@@ -269,9 +288,7 @@ public enum OpenAINonStreaming {
         if let u = json["usage"] as? [String: Any] {
             usage.input = u["prompt_tokens"] as? Int ?? 0
             usage.output = u["completion_tokens"] as? Int ?? 0
-            if let details = u["prompt_tokens_details"] as? [String: Any] {
-                usage.cacheRead = details["cached_tokens"] as? Int ?? 0
-            }
+            usage.cacheRead = openAIStyleCacheReadTokens(from: u, detailsKey: "prompt_tokens_details")
         }
         var tools: [(name: String, inputHash: String)] = []
         if let choices = json["choices"] as? [[String: Any]] {
@@ -304,9 +321,7 @@ public enum OpenAINonStreaming {
         var usage = TokenUsage.zero
         usage.input = u["input_tokens"] as? Int ?? 0
         usage.output = u["output_tokens"] as? Int ?? 0
-        if let details = u["input_tokens_details"] as? [String: Any] {
-            usage.cacheRead = details["cached_tokens"] as? Int ?? 0
-        }
+        usage.cacheRead = openAIStyleCacheReadTokens(from: u, detailsKey: "input_tokens_details")
         return usage
     }
 }
