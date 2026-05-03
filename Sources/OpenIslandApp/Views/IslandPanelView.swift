@@ -445,6 +445,8 @@ struct IslandPanelView: View {
                 .help("Today's LLM spend — click for breakdown")
             }
 
+            activeRoutingProfileChip
+
             headerIconButton(
                 systemName: model.isSoundMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
                 tint: model.isSoundMuted ? .orange.opacity(0.92) : .white.opacity(0.62)
@@ -460,6 +462,32 @@ struct IslandPanelView: View {
                 model.showSettings()
             }
         }
+    }
+
+    /// Chip rendering the active routing profile abbreviation
+    /// (ANT / DSV4P / DSV4F / CUSTOM). Tap deep-links to the
+    /// Model Routing settings pane. Lives only in the OPENED state
+    /// header — the closed notch has no horizontal room (already
+    /// crammed with icon + count badge), and at the at-a-glance
+    /// level provider identity isn't load-bearing. Reads the active
+    /// profile from `model.activeUpstreamProfileId` so the chip
+    /// re-renders the moment the user confirms a switch in
+    /// ModelRoutingPane.
+    @ViewBuilder
+    private var activeRoutingProfileChip: some View {
+        let profile = model.activeUpstreamProfile
+        let abbreviation = profile.compactPillAbbreviation
+        Button(action: { model.openModelRouting() }) {
+            Text(abbreviation)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .frame(height: Self.headerControlButtonSize)
+                .background(profile.compactPillTintColor.opacity(0.85), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Active routing profile — click to change")
+        .accessibilityLabel(Text("Active routing profile: \(abbreviation)"))
     }
 
     /// Compact context-fill bar shown next to the spend pill text.

@@ -122,12 +122,12 @@ public enum ModelRoutingDerivation {
 struct ModelRoutingPane: View {
     var model: AppModel
 
-    /// State refreshed from the underlying stores on appear and after
-    /// every mutation. Keeps the pane responsive without needing
-    /// `UpstreamProfileStore` / `RouterCredentialsStore` to be
-    /// `@Observable` (they intentionally aren't — proxy hot path
-    /// stays sync, see store-file rationale).
-    @State private var activeProfileId: String = UpstreamProfileStore.defaultActiveProfileId
+    /// `RouterCredentialsStore` is intentionally non-observable
+    /// (avoid Keychain reads on every view tick), so its presence
+    /// is mirrored on appear / after-save into local state. Active
+    /// profile id flows through `model.activeUpstreamProfileId`
+    /// directly — that one IS observable so the chip on the island
+    /// pill re-renders simultaneously with this pane on switch.
     @State private var hasDeepseekKey: Bool = false
     @State private var pendingSwitch: UpstreamProfile?
     @State private var configuringProfile: UpstreamProfile?
@@ -199,7 +199,7 @@ struct ModelRoutingPane: View {
     }
 
     private var activeStatusRow: some View {
-        let active = profileStore.currentActiveProfile()
+        let active = model.activeUpstreamProfile
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Circle()
@@ -276,7 +276,7 @@ struct ModelRoutingPane: View {
     private func derivedCardState(for profile: UpstreamProfile) -> ProfileCardState {
         ModelRoutingDerivation.cardState(
             profile: profile,
-            activeProfileId: activeProfileId,
+            activeProfileId: model.activeUpstreamProfileId,
             hasCredentialFor: { credentialsStore.hasCredential(for: $0) }
         )
     }
@@ -295,8 +295,10 @@ struct ModelRoutingPane: View {
 
     private func switchActive(to profile: UpstreamProfile) {
         do {
-            try profileStore.setActiveProfile(profile.id)
-            activeProfileId = profile.id
+            // Goes through AppModel so the chip on the compact pill
+            // re-renders in lockstep — model.activeUpstreamProfileId
+            // is the @Observable mirror.
+            try model.setActiveUpstreamProfile(profile.id)
             errorBanner = nil
         } catch {
             errorBanner = error.localizedDescription
@@ -304,7 +306,6 @@ struct ModelRoutingPane: View {
     }
 
     private func refreshState() {
-        activeProfileId = profileStore.currentActiveProfile().id
         hasDeepseekKey = credentialsStore.hasCredential(for: "deepseek")
         // Defensive: surface an error banner if we observe
         // .errorActiveButMissingKey on any built-in.

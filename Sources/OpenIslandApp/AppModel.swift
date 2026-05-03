@@ -61,6 +61,16 @@ final class AppModel {
     /// doesn't "stick" the next time the user opens Settings manually.
     var selectedSettingsTab: SettingsTab?
 
+    /// ID of the currently-active routing profile. The
+    /// `UpstreamProfileStore` is intentionally non-observable
+    /// (final class + NSLock keeps the proxy hot path sync; see
+    /// store-file rationale), so this AppModel-side mirror is the
+    /// observable surface the compact pill chip + ModelRoutingPane
+    /// re-render against. Always written via
+    /// `setActiveUpstreamProfile(_:)` so the store and this mirror
+    /// stay in lockstep.
+    private(set) var activeUpstreamProfileId: String = UpstreamProfileStore.defaultActiveProfileId
+
     /// Latest snapshot from the LLM stats store. Refreshed by a poll loop
     /// (`startLLMStatsRefreshLoop`) at ~1.5 s cadence; the store actor
     /// itself can be read at any time, this is just the cached value
@@ -566,6 +576,10 @@ final class AppModel {
         // single call routes through `ensureRtkRuntimeWired()`,
         // which is idempotent and gated on actual install state.
         hooks.refreshRtkStatus()
+        // Seed the observable active-profile mirror from the store's
+        // persisted state. Subsequent mutations go through
+        // `setActiveUpstreamProfile(_:)` which keeps both in sync.
+        activeUpstreamProfileId = llmProxy.profileStore.currentActiveProfile().id
 
         discovery.syntheticClaudeSessionPrefix = Self.syntheticClaudeSessionPrefix
         discovery.onStatusMessage = { [weak self] message in
@@ -621,11 +635,32 @@ final class AppModel {
     }
 
     /// Deep-link the Settings window straight to the Model Routing
-    /// pane. Wired from the future compact-island chip (4.4) and from
-    /// any toast that needs to invite the user to configure routing.
+    /// pane. Wired from the compact-island chip and from any toast
+    /// that needs to invite the user to configure routing.
     func openModelRouting() {
         selectedSettingsTab = .modelRouting
         showSettings()
+    }
+
+    /// Currently-active routing profile, resolved fresh from the store
+    /// each access. The id mirror (`activeUpstreamProfileId`) is what
+    /// drives observable redraws; this convenience accessor walks
+    /// builtins + custom profiles to find the matching object.
+    var activeUpstreamProfile: UpstreamProfile {
+        let store = llmProxy.profileStore
+        return store.allProfiles.first { $0.id == activeUpstreamProfileId }
+            ?? BuiltinProfiles.anthropicNative
+    }
+
+    /// Switch the active routing profile. Goes through the underlying
+    /// store first (single source of truth on disk), then mirrors the
+    /// new id into the @Observable `activeUpstreamProfileId` so any
+    /// SwiftUI view bound to AppModel redraws — without us having to
+    /// make `UpstreamProfileStore` itself Observable (which would
+    /// force async on the proxy hot path; see store-file rationale).
+    func setActiveUpstreamProfile(_ id: String) throws {
+        try llmProxy.profileStore.setActiveProfile(id)
+        activeUpstreamProfileId = id
     }
 
     func toggleLLMProxy() {

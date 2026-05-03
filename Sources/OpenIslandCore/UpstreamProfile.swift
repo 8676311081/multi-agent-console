@@ -144,6 +144,29 @@ public struct UpstreamProfile: Codable, Sendable, Identifiable, Equatable {
     }
 }
 
+// MARK: - Compact-pill helpers
+
+extension UpstreamProfile {
+    /// 3–6 character abbreviation rendered on the island pill chip.
+    /// Hint, not source of truth — Anthropic Native stays "ANT"
+    /// rather than reflecting Claude CLI's internal `/model`
+    /// selection (Opus / Sonnet / Haiku) because the proxy can't
+    /// reliably observe that without parsing every request body,
+    /// and even if we did the chip is a glance-cue, not the
+    /// authoritative provider state. Built-ins are switch-cased;
+    /// custom profiles render the literal "CUSTOM" string regardless
+    /// of their id, so users see a consistent affordance to "click
+    /// → see which custom profile is active".
+    public var compactPillAbbreviation: String {
+        switch id {
+        case "anthropic-native": return "ANT"
+        case "deepseek-v4-pro": return "DSV4P"
+        case "deepseek-v4-flash": return "DSV4F"
+        default: return isCustom ? "CUSTOM" : id.uppercased()
+        }
+    }
+}
+
 /// Errors returned from `UpstreamProfileStore` mutations.
 public enum UpstreamProfileError: LocalizedError, Sendable, Equatable {
     case unknownProfile(id: String)
