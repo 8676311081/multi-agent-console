@@ -37,10 +37,19 @@ public enum BuiltinProfiles {
         modelOverride: nil,
         isCustom: false,
         costMetadata: ProfileCostMetadata(
+            // Open Island's actual user base runs Claude CLI with the
+            // 1M-context Opus 4.7 SKU (claude-opus-4-7[1m]) — that's
+            // the "Anthropic" the routing card describes for them.
+            // Earlier we listed 200K + "(1M)" annotation, but that
+            // surfaced a bare 200K SKU nobody on this routing pane is
+            // actually using and made the card look contradictory
+            // next to the unambiguous DeepSeek 1M cards. ModelContext
+            // Limits handles the 200K case at the model-id layer for
+            // anyone who pins the bare SKU.
             inputUSDPerMtok: 5.00,
             outputUSDPerMtok: 25.00,
             cacheReadUSDPerMtok: 0.50,
-            contextWindowTokens: 200_000,
+            contextWindowTokens: 1_000_000,
             discountExpiresAt: nil
         )
     )
