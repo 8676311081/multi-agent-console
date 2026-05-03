@@ -237,6 +237,7 @@
 "settings.llmSpend.port" = "Port";
 "settings.llmSpend.todayTotal" = "Today";
 "settings.llmSpend.byClient" = "By client (today)";
+"settings.llmSpend.byModel" = "By model (today)";
 "settings.llmSpend.client.turns" = "turns";
 "settings.llmSpend.client.tokens" = "tokens";
 "settings.llmSpend.lastWarning" = "Most recent duplicate tool call";
@@ -269,6 +270,8 @@
 "settings.llmSpend.stats.dailyCost" = "Daily cost";
 "settings.llmSpend.stats.bySource" = "By source";
 "settings.llmSpend.stats.colClient" = "Client";
+"settings.llmSpend.stats.byModel" = "By model";
+"settings.llmSpend.stats.colModel" = "Model";
 "settings.llmSpend.stats.colTurns" = "Turns";
 "settings.llmSpend.stats.colTokens" = "Tokens";
 "settings.llmSpend.stats.colCost" = "Cost";

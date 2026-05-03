@@ -57,6 +57,9 @@ struct LLMSpendStatsView: View {
                         summaryCards
                         chartSection
                         bySourceSection
+                        if !modelBreakdown().isEmpty {
+                            modelBySourceSection
+                        }
                     }
                 }
                 .padding(20)
@@ -472,6 +475,128 @@ struct LLMSpendStatsView: View {
                 .padding(.trailing, 14)
         }
         .padding(.vertical, 10)
+    }
+
+    // MARK: - By Model
+
+    private struct ModelEntry {
+        let modelID: String
+        let turns: Int
+        let cost: Double
+        let isUnpriced: Bool
+
+        var costDisplay: String {
+            if turns > 0, isUnpriced { return "—" }
+            let prefix = isUnpriced && cost > 0 ? "~" : ""
+            return prefix + LLMSpendFormatting.formatCost(cost)
+        }
+    }
+
+    private func modelBreakdown() -> [ModelEntry] {
+        var byModel: [String: (turns: Int, cost: Double, unpricedTurns: Int)] = [:]
+        for entry in rangeData {
+            for bucket in entry.buckets.values where bucket.turns > 0 {
+                for (modelID, mTurns) in bucket.modelTurns where mTurns > 0 {
+                    let mCost = bucket.modelCosts[modelID] ?? 0
+                    let hasCost = bucket.modelCosts.keys.contains(modelID)
+                    var sums = byModel[modelID] ?? (0, 0, 0)
+                    sums.turns += mTurns
+                    sums.cost += mCost
+                    if !hasCost { sums.unpricedTurns += mTurns }
+                    byModel[modelID] = sums
+                }
+            }
+        }
+        return byModel.map { id, val in
+            ModelEntry(
+                modelID: id,
+                turns: val.turns,
+                cost: val.cost,
+                isUnpriced: val.unpricedTurns == val.turns && val.cost == 0
+            )
+        }
+        .sorted { $0.cost > $1.cost }
+    }
+
+    private var modelBySourceSection: some View {
+        let entries = modelBreakdown()
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(lang.t("settings.llmSpend.stats.byModel").uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.4)
+
+            VStack(spacing: 0) {
+                modelBySourceHeader
+                Divider()
+                ForEach(Array(entries.enumerated()), id: \.element.modelID) { index, entry in
+                    modelBySourceRow(entry)
+                    if index < entries.count - 1 {
+                        Divider().padding(.leading, 12)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(.quaternary, lineWidth: 0.5)
+            )
+        }
+    }
+
+    private var modelBySourceHeader: some View {
+        HStack(spacing: 0) {
+            Text(lang.t("settings.llmSpend.stats.colModel"))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 28)
+            Text(lang.t("settings.llmSpend.stats.colTurns"))
+                .frame(width: 70, alignment: .trailing)
+            Text(lang.t("settings.llmSpend.stats.colCost"))
+                .frame(width: 80, alignment: .trailing)
+                .padding(.trailing, 14)
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .tracking(0.3)
+        .padding(.vertical, 8)
+    }
+
+    private func modelBySourceRow(_ entry: ModelEntry) -> some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(modelColor(for: entry.modelID))
+                    .frame(width: 8, height: 8)
+                Text(entry.modelID)
+                    .font(.subheadline)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 14)
+
+            Text("\(entry.turns)")
+                .font(.subheadline.monospacedDigit())
+                .frame(width: 70, alignment: .trailing)
+            Text(entry.costDisplay)
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(entry.isUnpriced ? Color.orange : Color.primary)
+                .frame(width: 80, alignment: .trailing)
+                .help(entry.isUnpriced ? lang.t("settings.llmSpend.unpricedTooltip") : "")
+                .padding(.trailing, 14)
+        }
+        .padding(.vertical, 10)
+    }
+
+    private func modelColor(for modelID: String) -> Color {
+        let palette: [Color] = [
+            .orange, .blue, .purple, .green, .pink, .teal,
+            .yellow, .red, .mint, .indigo, .cyan, .brown
+        ]
+        var hasher = Hasher()
+        hasher.combine(modelID)
+        let idx = abs(hasher.finalize()) % palette.count
+        return palette[idx]
     }
 
     // MARK: - Empty state

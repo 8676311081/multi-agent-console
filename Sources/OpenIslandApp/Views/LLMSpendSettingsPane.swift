@@ -33,6 +33,9 @@ struct LLMSpendSettingsPane: View {
                 if !todayBreakdown.isEmpty {
                     breakdownSection
                 }
+                if !todayModelBreakdown.isEmpty {
+                    modelBreakdownSection
+                }
                 if let warning = mostRecentWarning {
                     duplicateWarningSection(warning)
                 }
@@ -169,6 +172,85 @@ struct LLMSpendSettingsPane: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(entry.hasUnpriced ? Color.orange : Color.primary)
                 .help(entry.hasUnpriced ? lang.t("settings.llmSpend.unpricedTooltip") : "")
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+    }
+
+    // MARK: - Model breakdown
+
+    private struct ModelBreakdownEntry {
+        let modelID: String
+        let displayName: String
+        let turns: Int
+        let cost: Double
+        let isUnpriced: Bool
+
+        var costDisplay: String {
+            if isUnpriced { return "—" }
+            return LLMSpendFormatting.formatCost(cost)
+        }
+    }
+
+    private var todayModelBreakdown: [ModelBreakdownEntry] {
+        var byModel: [String: (turns: Int, cost: Double, isUnpriced: Bool)] = [:]
+        for bucket in todayBuckets.values where bucket.turns > 0 {
+            for (modelID, mTurns) in bucket.modelTurns where mTurns > 0 {
+                let mCost = bucket.modelCosts[modelID] ?? 0
+                let hasCost = bucket.modelCosts.keys.contains(modelID)
+                var entry = byModel[modelID] ?? (0, 0, false)
+                entry.turns += mTurns
+                entry.cost += mCost
+                entry.isUnpriced = !hasCost && mCost == 0
+                byModel[modelID] = entry
+            }
+        }
+        return byModel
+            .map { id, val in
+                ModelBreakdownEntry(
+                    modelID: id,
+                    displayName: id, // raw ID is concise and recognizable
+                    turns: val.turns,
+                    cost: val.cost,
+                    isUnpriced: val.isUnpriced
+                )
+            }
+            .sorted { $0.cost > $1.cost }
+    }
+
+    private var modelBreakdownSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(lang.t("settings.llmSpend.byModel"))
+                .font(.headline)
+            VStack(spacing: 0) {
+                ForEach(Array(todayModelBreakdown.enumerated()), id: \.element.modelID) { index, entry in
+                    modelBreakdownRow(entry)
+                    if index < todayModelBreakdown.count - 1 {
+                        Divider().padding(.leading, 12)
+                    }
+                }
+            }
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func modelBreakdownRow(_ entry: ModelBreakdownEntry) -> some View {
+        HStack(spacing: 12) {
+            Text(entry.displayName)
+                .font(.subheadline.weight(.medium))
+                .frame(width: 180, alignment: .leading)
+                .lineLimit(1)
+
+            Text("\(entry.turns) \(lang.t("settings.llmSpend.client.turns"))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 80, alignment: .leading)
+
+            Text(entry.costDisplay)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(entry.isUnpriced ? Color.orange : Color.primary)
+                .help(entry.isUnpriced ? lang.t("settings.llmSpend.unpricedTooltip") : "")
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)

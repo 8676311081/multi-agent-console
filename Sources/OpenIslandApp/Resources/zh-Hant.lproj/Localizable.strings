@@ -206,6 +206,7 @@
 "settings.llmSpend.port" = "連接埠";
 "settings.llmSpend.todayTotal" = "今日";
 "settings.llmSpend.byClient" = "今日各用戶端";
+"settings.llmSpend.byModel" = "今日各模型";
 "settings.llmSpend.client.turns" = "輪次";
 "settings.llmSpend.client.tokens" = "tokens";
 "settings.llmSpend.lastWarning" = "最近一次重複工具呼叫";
@@ -238,6 +239,8 @@
 "settings.llmSpend.stats.dailyCost" = "每日費用";
 "settings.llmSpend.stats.bySource" = "依來源";
 "settings.llmSpend.stats.colClient" = "用戶端";
+"settings.llmSpend.stats.byModel" = "依模型";
+"settings.llmSpend.stats.colModel" = "模型";
 "settings.llmSpend.stats.colTurns" = "輪次";
 "settings.llmSpend.stats.colTokens" = "Tokens";
 "settings.llmSpend.stats.colCost" = "費用";

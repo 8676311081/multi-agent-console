@@ -153,6 +153,7 @@ public actor LLMUsageObserver: LLMProxyObserver {
             await store.recordRequestCompletion(
                 date: context.receivedAt,
                 client: state.client,
+                model: state.model,
                 usage: usage,
                 costUsd: cost,
                 unusedToolTokensWasted: unusedTokensWasted
