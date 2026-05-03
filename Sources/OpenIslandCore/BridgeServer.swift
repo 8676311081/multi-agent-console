@@ -129,6 +129,8 @@ public final class BridgeServer: @unchecked Sendable {
                 }
             }
 
+            fchmod(fd, 0o600)
+
             guard listen(fd, 16) != -1 else {
                 throw BridgeTransportError.systemCallFailed("listen", errno)
             }

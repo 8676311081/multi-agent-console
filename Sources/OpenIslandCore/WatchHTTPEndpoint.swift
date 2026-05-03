@@ -276,6 +276,11 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
     // MARK: - Private: HTTP Routing
 
     private func routeHTTPRequest(data: Data, connection: NWConnection) {
+        guard data.count <= 131_072 else {
+            sendHTTPResponse(connection: connection, status: "413 Payload Too Large", body: #"{"error":"request too large"}"#)
+            return
+        }
+
         guard let requestString = String(data: data, encoding: .utf8) else {
             sendHTTPResponse(connection: connection, status: "400 Bad Request", body: #"{"error":"invalid request"}"#)
             return
