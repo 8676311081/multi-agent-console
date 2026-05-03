@@ -116,12 +116,16 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
     private static let pairingCodeLength = 6
     private static let pairingCodeExpiry: TimeInterval = 120 // 2 minutes
     private static let tokenExpiry: TimeInterval = 3600 // 1 hour
+    private static let maxPairAttemptsPerCode = 5
+    private static let pairRateLimitDelay: TimeInterval = 2 // seconds after max attempts
 
     private let queue = DispatchQueue(label: "app.openisland.watch.http", qos: .userInitiated)
 
     // Pairing state
     private var currentPairingCode: String = ""
     private var pairingCodeGeneratedAt: Date = .distantPast
+    private var pairAttempts: Int = 0
+    private var pairBlockedUntil: Date = .distantPast
     private var validTokens: [String: Date] = [:]
 
     // SSE connections
@@ -207,6 +211,7 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
     private func startListener() {
         do {
             let params = NWParameters.tcp
+            params.requiredInterfaceType = .wifi
             let listener = try NWListener(using: params)
 
             // Bonjour advertising
@@ -315,21 +320,38 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
             return
         }
 
+        // Rate limit: block if we've exceeded max attempts recently
+        let now = Date()
+        if now < pairBlockedUntil {
+            sendHTTPResponse(connection: connection, status: "429 Too Many Requests", body: #"{"error":"too many attempts"}"#)
+            return
+        }
+
         // Check if pairing code expired
-        if Date().timeIntervalSince(pairingCodeGeneratedAt) > Self.pairingCodeExpiry {
+        if now.timeIntervalSince(pairingCodeGeneratedAt) > Self.pairingCodeExpiry {
             regeneratePairingCodeUnsafe()
             sendHTTPResponse(connection: connection, status: "410 Gone", body: #"{"error":"pairing code expired"}"#)
             return
         }
 
         guard request.code == currentPairingCode else {
+            pairAttempts += 1
+            if pairAttempts >= Self.maxPairAttemptsPerCode {
+                // Regenerate code and block further attempts briefly
+                regeneratePairingCodeUnsafe()
+                pairBlockedUntil = now.addingTimeInterval(Self.pairRateLimitDelay)
+            }
             sendHTTPResponse(connection: connection, status: "403 Forbidden", body: #"{"error":"invalid pairing code"}"#)
             return
         }
 
+        // Successful pair — reset rate limit state
+        pairAttempts = 0
+        pairBlockedUntil = .distantPast
+
         // Generate token
         let token = UUID().uuidString
-        validTokens[token] = Date().addingTimeInterval(Self.tokenExpiry)
+        validTokens[token] = now.addingTimeInterval(Self.tokenExpiry)
 
         // Regenerate pairing code after successful pair
         regeneratePairingCodeUnsafe()
@@ -508,6 +530,20 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
         let digits = (0..<Self.pairingCodeLength).map { _ in String(Int.random(in: 0...9)) }
         currentPairingCode = digits.joined()
         pairingCodeGeneratedAt = Date()
+        pairAttempts = 0
+        pairBlockedUntil = .distantPast
+        pruneExpiredTokens()
         Self.logger.info("New pairing code generated")
+    }
+
+    private func pruneExpiredTokens() {
+        let now = Date()
+        let expired = validTokens.filter { $0.value <= now }.map(\.key)
+        for token in expired {
+            validTokens.removeValue(forKey: token)
+        }
+        if !expired.isEmpty {
+            Self.logger.info("Pruned \(expired.count) expired token(s)")
+        }
     }
 }
