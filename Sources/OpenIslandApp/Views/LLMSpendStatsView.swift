@@ -482,6 +482,9 @@ struct LLMSpendStatsView: View {
     private struct ModelEntry {
         let modelID: String
         let turns: Int
+        /// nil when *every* bucket aggregating into this model is a
+        /// legacy bucket without modelTokens recorded — UI shows "—".
+        let tokens: Int?
         let cost: Double
         let isUnpriced: Bool
 
@@ -490,19 +493,28 @@ struct LLMSpendStatsView: View {
             let prefix = isUnpriced && cost > 0 ? "~" : ""
             return prefix + LLMSpendFormatting.formatCost(cost)
         }
+
+        func tokensDisplay(using formatter: (Int) -> String) -> String {
+            guard let tokens else { return "—" }
+            return formatter(tokens)
+        }
     }
 
     private func modelBreakdown() -> [ModelEntry] {
-        var byModel: [String: (turns: Int, cost: Double, unpricedTurns: Int)] = [:]
+        var byModel: [String: (turns: Int, tokens: Int, cost: Double, unpricedTurns: Int, hasTokens: Bool)] = [:]
         for entry in rangeData {
             for bucket in entry.buckets.values where bucket.turns > 0 {
                 for (modelID, mTurns) in bucket.modelTurns where mTurns > 0 {
                     let mCost = bucket.modelCosts[modelID] ?? 0
                     let hasCost = bucket.modelCosts.keys.contains(modelID)
-                    var sums = byModel[modelID] ?? (0, 0, 0)
+                    let mTokens = bucket.modelTokens[modelID] ?? 0
+                    let hasTokens = bucket.modelTokens.keys.contains(modelID)
+                    var sums = byModel[modelID] ?? (0, 0, 0, 0, false)
                     sums.turns += mTurns
+                    sums.tokens += mTokens
                     sums.cost += mCost
                     if !hasCost { sums.unpricedTurns += mTurns }
+                    if hasTokens { sums.hasTokens = true }
                     byModel[modelID] = sums
                 }
             }
@@ -511,6 +523,7 @@ struct LLMSpendStatsView: View {
             ModelEntry(
                 modelID: id,
                 turns: val.turns,
+                tokens: val.hasTokens ? val.tokens : nil,
                 cost: val.cost,
                 isUnpriced: val.unpricedTurns == val.turns && val.cost == 0
             )
@@ -552,6 +565,8 @@ struct LLMSpendStatsView: View {
                 .padding(.leading, 28)
             Text(lang.t("settings.llmSpend.stats.colTurns"))
                 .frame(width: 70, alignment: .trailing)
+            Text(lang.t("settings.llmSpend.stats.colTokens"))
+                .frame(width: 80, alignment: .trailing)
             Text(lang.t("settings.llmSpend.stats.colCost"))
                 .frame(width: 80, alignment: .trailing)
                 .padding(.trailing, 14)
@@ -578,6 +593,10 @@ struct LLMSpendStatsView: View {
             Text("\(entry.turns)")
                 .font(.subheadline.monospacedDigit())
                 .frame(width: 70, alignment: .trailing)
+            Text(entry.tokensDisplay(using: formattedTokens))
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(entry.tokens == nil ? Color.secondary : Color.primary)
+                .frame(width: 80, alignment: .trailing)
             Text(entry.costDisplay)
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(entry.isUnpriced ? Color.orange : Color.primary)

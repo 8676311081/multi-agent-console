@@ -38,6 +38,13 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
     /// contribute $0). Optional on decode → `[:]` for legacy
     /// buckets.
     public var modelCosts: [String: Double]
+    /// Per-model accumulated tokens (in + cache_write + cache_read + out).
+    /// Mirrors how `tokensIn + tokensOut` is summed at the bucket level
+    /// for the bySource row, but split by model so the byModel row can
+    /// display the same metric. Sum across keys equals
+    /// `tokensIn + tokensOut` for buckets recorded after this field
+    /// landed; legacy buckets decode to `[:]` and the UI shows "—".
+    public var modelTokens: [String: Int]
     public var duplicateToolCalls: Int
     /// Sum of estimated tokens for tools the model declared in
     /// `tools[]` but never invoked during the turn. Estimated from
@@ -60,6 +67,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         unpricedTurns: Int = 0,
         modelTurns: [String: Int] = [:],
         modelCosts: [String: Double] = [:],
+        modelTokens: [String: Int] = [:],
         duplicateToolCalls: Int = 0,
         unusedToolTokensWasted: Int = 0,
         lastWarning: LLMDuplicateWarning? = nil,
@@ -75,6 +83,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         self.unpricedTurns = unpricedTurns
         self.modelTurns = modelTurns
         self.modelCosts = modelCosts
+        self.modelTokens = modelTokens
         self.duplicateToolCalls = duplicateToolCalls
         self.unusedToolTokensWasted = unusedToolTokensWasted
         self.lastWarning = lastWarning
@@ -85,7 +94,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         case turns, tokensIn, tokensOut
         case inputTokens, cacheReadTokens, cacheCreationTokens
         case costUsd, unpricedTurns
-        case modelTurns, modelCosts
+        case modelTurns, modelCosts, modelTokens
         case duplicateToolCalls
         case unusedToolTokensWasted
         case lastWarning, lastUpdatedAt
@@ -103,6 +112,7 @@ public struct LLMDayBucket: Codable, Sendable, Equatable {
         unpricedTurns = try c.decodeIfPresent(Int.self, forKey: .unpricedTurns) ?? 0
         modelTurns = try c.decodeIfPresent([String: Int].self, forKey: .modelTurns) ?? [:]
         modelCosts = try c.decodeIfPresent([String: Double].self, forKey: .modelCosts) ?? [:]
+        modelTokens = try c.decodeIfPresent([String: Int].self, forKey: .modelTokens) ?? [:]
         duplicateToolCalls = try c.decodeIfPresent(Int.self, forKey: .duplicateToolCalls) ?? 0
         unusedToolTokensWasted = try c.decodeIfPresent(Int.self, forKey: .unusedToolTokensWasted) ?? 0
         lastWarning = try c.decodeIfPresent(LLMDuplicateWarning.self, forKey: .lastWarning)
@@ -303,6 +313,9 @@ public actor LLMStatsStore {
             if let costUsd {
                 bucket.modelCosts[model, default: 0] += costUsd
             }
+            // Match the bucket-level tokens metric (in + cache_write + cache_read + out)
+            // so the byModel row totals to the bySource row.
+            bucket.modelTokens[model, default: 0] += usage.input + usage.cacheWrite + usage.cacheRead + usage.output
         }
         bucket.lastUpdatedAt = date
         dayBuckets[client.rawValue] = bucket
