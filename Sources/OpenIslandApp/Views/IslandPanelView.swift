@@ -743,6 +743,8 @@ struct IslandPanelView: View {
     @ViewBuilder
     private var openedUsageSummary: some View {
         let providers = openedUsageProviders
+        let driftSuspected = model.claudeWebUsageEnabled
+            && model.claudeWebUsagePollerState.driftSuspected
 
         if providers.isEmpty == false {
             ViewThatFits(in: .horizontal) {
@@ -750,6 +752,18 @@ struct IslandPanelView: View {
                 usageSummaryView(providers, layout: .compact)
                 usageSummaryView(providers, layout: .condensed)
                 usageSummaryView(providers, layout: .minimal)
+            }
+            .padding(.horizontal, driftSuspected ? 6 : 0)
+            .padding(.vertical, driftSuspected ? 2 : 0)
+            .overlay {
+                if driftSuspected {
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(
+                            .orange.opacity(0.55),
+                            style: StrokeStyle(lineWidth: 1, dash: [3, 2])
+                        )
+                        .help("Realtime usage refresh has failed \(model.claudeWebUsagePollerState.consecutiveFailures) times in a row. Numbers may be stale; check Settings → Setup → Realtime Web Usage.")
+                }
             }
         } else {
             HStack(spacing: 8) {
@@ -778,7 +792,8 @@ struct IslandPanelView: View {
                         id: "claude-5h",
                         label: "5h",
                         usedPercentage: fiveHour.usedPercentage,
-                        resetsAt: fiveHour.resetsAt
+                        resetsAt: fiveHour.resetsAt,
+                        cachedAt: snapshot.cachedAt
                     )
                 )
             }
@@ -789,7 +804,8 @@ struct IslandPanelView: View {
                         id: "claude-7d",
                         label: "7d",
                         usedPercentage: sevenDay.usedPercentage,
-                        resetsAt: sevenDay.resetsAt
+                        resetsAt: sevenDay.resetsAt,
+                        cachedAt: snapshot.cachedAt
                     )
                 )
             }
@@ -813,7 +829,8 @@ struct IslandPanelView: View {
                     id: "codex-\(window.key)",
                     label: window.label,
                     usedPercentage: window.usedPercentage,
-                    resetsAt: window.resetsAt
+                    resetsAt: window.resetsAt,
+                    cachedAt: snapshot.capturedAt
                 )
             }
 
@@ -956,7 +973,9 @@ struct IslandPanelView: View {
         window: UsageWindowPresentation,
         layout: UsageSummaryLayout
     ) -> some View {
-        HStack(spacing: 4) {
+        let stalenessOpacity = stalenessOpacity(for: window.cachedAt)
+
+        return HStack(spacing: 4) {
             if layout.showsWindowLabel {
                 Text(window.label)
                     .font(.system(size: 11, weight: .semibold))
@@ -965,7 +984,7 @@ struct IslandPanelView: View {
 
             Text("\(window.roundedUsedPercentage)%")
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(usageColor(for: window.usedPercentage))
+                .foregroundStyle(usageColor(for: window.usedPercentage).opacity(stalenessOpacity))
 
             if layout.showsResetTime,
                let resetsAt = window.resetsAt,
@@ -973,6 +992,16 @@ struct IslandPanelView: View {
                 Text(remaining)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.35))
+            }
+
+            if layout.showsResetTime,
+               let cachedAt = window.cachedAt,
+               let staleAge = staleAgeString(since: cachedAt) {
+                Text(staleAge)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.yellow.opacity(0.55))
+                    .accessibilityLabel("Cached \(staleAge)")
+                    .help(usageStalenessTooltip(provider: window.id, age: staleAge))
             }
         }
     }
@@ -1025,6 +1054,43 @@ struct IslandPanelView: View {
 
         return formatter.string(from: interval)
     }
+
+    private func stalenessOpacity(for cachedAt: Date?) -> Double {
+        guard let cachedAt else {
+            return 1.0
+        }
+        let age = -cachedAt.timeIntervalSinceNow
+        switch age {
+        case ..<300:        return 1.0   // < 5 min: fresh
+        case 300..<1_800:   return 0.6   // 5–30 min: aging
+        default:            return 0.35  // > 30 min: stale
+        }
+    }
+
+    private func usageStalenessTooltip(provider: String, age: String) -> String {
+        if provider.hasPrefix("claude-") {
+            return "Cached \(age). Claude usage updates only when Claude Code's interactive statusline receives fresh rate_limits. Claude Desktop and web usage may already be newer."
+        } else if provider.hasPrefix("codex-") {
+            return "Cached \(age). Codex usage is read from local rollout files; numbers refresh on the next assistant turn."
+        }
+        return "Cached \(age)."
+    }
+
+    private func staleAgeString(since cachedAt: Date) -> String? {
+        let age = -cachedAt.timeIntervalSinceNow
+        guard age >= 300 else {
+            return nil
+        }
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .abbreviated
+        formatter.maximumUnitCount = 1
+        if age >= 3_600 {
+            formatter.allowedUnits = [.hour]
+        } else {
+            formatter.allowedUnits = [.minute]
+        }
+        return formatter.string(from: age).map { "\($0) ago" }
+    }
 }
 
 private struct UsageProviderPresentation: Identifiable {
@@ -1049,6 +1115,7 @@ private struct UsageWindowPresentation: Identifiable {
     let label: String
     let usedPercentage: Double
     let resetsAt: Date?
+    let cachedAt: Date?
 
     var roundedUsedPercentage: Int {
         Int(usedPercentage.rounded())

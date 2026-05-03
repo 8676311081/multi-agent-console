@@ -153,9 +153,25 @@ public enum ClaudeHookInstaller {
             return [:]
         }
 
+        // Reject suspiciously large or small settings files
+        guard data.count <= 1_048_576 else {
+            throw ClaudeHookInstallerError.invalidSettingsJSON
+        }
+
         let object = try JSONSerialization.jsonObject(with: data)
         guard let rootObject = object as? [String: Any] else {
             throw ClaudeHookInstallerError.invalidSettingsJSON
+        }
+
+        // Validate hooks structure to catch malformed files early
+        if let hooks = rootObject["hooks"] as? [String: Any] {
+            for (eventName, groups) in hooks {
+                guard eventName is String,
+                      groups is [Any],
+                      (groups as? [Any])?.count ?? 0 <= 256 else {
+                    throw ClaudeHookInstallerError.invalidSettingsJSON
+                }
+            }
         }
 
         return rootObject

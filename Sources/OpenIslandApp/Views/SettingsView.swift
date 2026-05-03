@@ -185,7 +185,7 @@ struct SettingsView: View {
 
             if model.updateChecker.hasUpdate, let version = model.updateChecker.latestVersion {
                 UpdateBanner(version: version, lang: lang) {
-                    model.updateChecker.checkForUpdates()
+                    NSWorkspace.shared.open(UpdateChecker.releasesURL)
                 }
                 .padding(.top, 8)
                 .padding(.trailing, 16)
@@ -376,11 +376,9 @@ struct AboutSettingsPane: View {
                         systemImage: "arrow.triangle.2.circlepath",
                         tint: primaryInk,
                         action: {
-                            model.updateChecker.checkForUpdates()
+                            NSWorkspace.shared.open(UpdateChecker.releasesURL)
                         }
                     )
-                    .disabled(!model.updateChecker.canCheckForUpdates)
-                    .opacity(model.updateChecker.canCheckForUpdates ? 1 : 0.55)
                     .accessibilityIdentifier("settings.about.checkForUpdates")
                 }
 
@@ -650,6 +648,8 @@ struct SetupSettingsPane: View {
                         .foregroundStyle(.tertiary)
                 }
             }
+
+            ClaudeWebUsageSection(model: model)
 
             Section(lang.t("setup.section.permissions")) {
                 HStack(alignment: .top) {

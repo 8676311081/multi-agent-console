@@ -13,12 +13,14 @@ public final class BridgeServer: @unchecked Sendable {
 
     private struct PendingApproval {
         let clientID: UUID
+        let createdAt = Date()
     }
 
     private struct PendingClaudeToolContext {
         let toolUseID: String?
         let toolName: String?
         let toolInput: ClaudeHookJSONValue?
+        let createdAt = Date()
     }
 
     private struct PendingClaudeInteraction {
@@ -29,6 +31,7 @@ public final class BridgeServer: @unchecked Sendable {
 
         let clientID: UUID
         let kind: Kind
+        let createdAt = Date()
     }
 
     private struct PendingOpenCodeInteraction {
@@ -39,6 +42,7 @@ public final class BridgeServer: @unchecked Sendable {
 
         let clientID: UUID
         let kind: Kind
+        let createdAt = Date()
     }
 
     private struct Listener {
@@ -50,6 +54,7 @@ public final class BridgeServer: @unchecked Sendable {
     private struct PendingCursorInteraction {
         let clientID: UUID
         let payload: CursorHookPayload
+        let createdAt = Date()
     }
 
     private let socketURL: URL
@@ -76,6 +81,7 @@ public final class BridgeServer: @unchecked Sendable {
     /// state — it only contains sessions created via bridge hooks and is
     /// overwritten whenever AppModel pushes a fresh snapshot.
     private var localState = SessionState()
+    private var staleInteractionSweepTimer: DispatchSourceTimer?
 
     public init(
         socketURL: URL = BridgeSocketLocation.defaultURL
@@ -105,6 +111,15 @@ public final class BridgeServer: @unchecked Sendable {
                 listeners.append(legacyListener)
             }
         }
+
+        // Periodic sweep: remove pending interactions older than 10 minutes
+        let sweepTimer = DispatchSource.makeTimerSource(queue: queue)
+        sweepTimer.schedule(deadline: .now() + 120, repeating: 120)
+        sweepTimer.setEventHandler { [weak self] in
+            self?.sweepStalePendingEntries()
+        }
+        sweepTimer.resume()
+        staleInteractionSweepTimer = sweepTimer
     }
 
     private func bindListener(at url: URL) throws -> Listener {
@@ -188,6 +203,8 @@ public final class BridgeServer: @unchecked Sendable {
     }
 
     private func stopLocked() {
+        staleInteractionSweepTimer?.cancel()
+        staleInteractionSweepTimer = nil
         pendingApprovals.removeAll()
         pendingClaudeInteractions.removeAll()
         pendingClaudeToolContexts.removeAll()
@@ -207,6 +224,18 @@ public final class BridgeServer: @unchecked Sendable {
         // clean up stale sockets before binding.  Deleting in stop() causes
         // a race when the old process is being terminated while a new process
         // has already created its socket at the same path.
+    }
+
+    /// Remove pending interactions that have been unresolved for over 10 minutes.
+    /// Fires every 2 minutes on the bridge queue.
+    private func sweepStalePendingEntries() {
+        let cutoff = Date().addingTimeInterval(-600) // 10 minutes ago
+
+        pendingApprovals = pendingApprovals.filter { $0.value.createdAt > cutoff }
+        pendingClaudeInteractions = pendingClaudeInteractions.filter { $0.value.createdAt > cutoff }
+        pendingClaudeToolContexts = pendingClaudeToolContexts.filter { $0.value.createdAt > cutoff }
+        pendingOpenCodeInteractions = pendingOpenCodeInteractions.filter { $0.value.createdAt > cutoff }
+        pendingCursorInteractions = pendingCursorInteractions.filter { $0.value.createdAt > cutoff }
     }
 
     private func acceptPendingClients(on listeningFileDescriptor: Int32) {
@@ -512,6 +541,7 @@ public final class BridgeServer: @unchecked Sendable {
 
             emit(approvalEvent)
 
+            guard pendingApprovals[payload.sessionID] == nil else { return }
             pendingApprovals[payload.sessionID] = PendingApproval(
                 clientID: clientID
             )
@@ -612,6 +642,7 @@ public final class BridgeServer: @unchecked Sendable {
             ensureClaudeSessionExists(for: payload)
             synchronizeClaudeJumpTarget(for: payload)
             synchronizeClaudeMetadata(for: payload)
+            guard pendingClaudeToolContexts[payload.permissionCorrelationKey] == nil else { return }
             pendingClaudeToolContexts[payload.permissionCorrelationKey] = PendingClaudeToolContext(
                 toolUseID: payload.toolUseID,
                 toolName: payload.toolName,
@@ -693,6 +724,7 @@ public final class BridgeServer: @unchecked Sendable {
                     )
                 )
 
+                guard pendingClaudeInteractions[payload.sessionID] == nil else { return }
                 pendingClaudeInteractions[payload.sessionID] = PendingClaudeInteraction(
                     clientID: clientID,
                     kind: .question(payload, prompt)
@@ -744,6 +776,7 @@ public final class BridgeServer: @unchecked Sendable {
                     )
                 )
 
+                guard pendingClaudeInteractions[payload.sessionID] == nil else { return }
                 pendingClaudeInteractions[payload.sessionID] = PendingClaudeInteraction(
                     clientID: clientID,
                     kind: .permission(payload)
@@ -1093,6 +1126,7 @@ public final class BridgeServer: @unchecked Sendable {
                 )
             )
 
+            guard pendingOpenCodeInteractions[payload.sessionID] == nil else { return }
             pendingOpenCodeInteractions[payload.sessionID] = PendingOpenCodeInteraction(
                 clientID: clientID,
                 kind: .permission(payload)
@@ -1117,6 +1151,7 @@ public final class BridgeServer: @unchecked Sendable {
                 )
             )
 
+            guard pendingOpenCodeInteractions[payload.sessionID] == nil else { return }
             pendingOpenCodeInteractions[payload.sessionID] = PendingOpenCodeInteraction(
                 clientID: clientID,
                 kind: .question(payload)
@@ -1184,36 +1219,52 @@ public final class BridgeServer: @unchecked Sendable {
             ensureCursorSessionExists(for: payload)
             synchronizeCursorJumpTarget(for: payload)
             synchronizeCursorMetadata(for: payload)
-            let shellSummary = payload.commandPreview.map { "Running: \($0)" } ?? "Running shell command"
             emit(
-                .activityUpdated(
-                    SessionActivityUpdated(
+                .permissionRequested(
+                    PermissionRequested(
                         sessionID: payload.sessionID,
-                        summary: shellSummary,
-                        phase: .running,
+                        request: PermissionRequest(
+                            title: payload.permissionRequestTitle,
+                            summary: payload.permissionRequestSummary,
+                            affectedPath: payload.cwd ?? "",
+                            primaryActionTitle: "Allow Once",
+                            secondaryActionTitle: "Deny"
+                        ),
                         timestamp: .now
                     )
                 )
             )
-            send(.response(.cursorHookDirective(CursorHookDirective(permission: .allow))), to: clientID)
+            guard pendingCursorInteractions[payload.sessionID] == nil else { return }
+            pendingCursorInteractions[payload.sessionID] = PendingCursorInteraction(
+                clientID: clientID,
+                payload: payload
+            )
 
         case .beforeMCPExecution:
             clearStaleCursorInteractionIfNeeded(for: payload.sessionID)
             ensureCursorSessionExists(for: payload)
             synchronizeCursorJumpTarget(for: payload)
             synchronizeCursorMetadata(for: payload)
-            let mcpSummary = payload.toolName.map { "Calling \($0)" } ?? "Calling MCP tool"
             emit(
-                .activityUpdated(
-                    SessionActivityUpdated(
+                .permissionRequested(
+                    PermissionRequested(
                         sessionID: payload.sessionID,
-                        summary: mcpSummary,
-                        phase: .running,
+                        request: PermissionRequest(
+                            title: payload.permissionRequestTitle,
+                            summary: payload.permissionRequestSummary,
+                            affectedPath: payload.workspaceRoots.first ?? "",
+                            primaryActionTitle: "Allow Once",
+                            secondaryActionTitle: "Deny"
+                        ),
                         timestamp: .now
                     )
                 )
             )
-            send(.response(.cursorHookDirective(CursorHookDirective(permission: .allow))), to: clientID)
+            guard pendingCursorInteractions[payload.sessionID] == nil else { return }
+            pendingCursorInteractions[payload.sessionID] = PendingCursorInteraction(
+                clientID: clientID,
+                payload: payload
+            )
 
         case .beforeReadFile:
             clearStaleCursorInteractionIfNeeded(for: payload.sessionID)

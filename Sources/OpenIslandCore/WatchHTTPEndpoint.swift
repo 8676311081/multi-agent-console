@@ -115,6 +115,7 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
     private static let serviceType = "_openisland._tcp"
     private static let pairingCodeLength = 6
     private static let pairingCodeExpiry: TimeInterval = 120 // 2 minutes
+    private static let tokenExpiry: TimeInterval = 3600 // 1 hour
 
     // Brute-force protection tunables. A 6-digit code is 1M values; combined
     // with a 5-minute rolling window of 10 failures per peer IP and a
@@ -134,7 +135,7 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
     // Pairing state
     private var currentPairingCode: String = ""
     private var pairingCodeGeneratedAt: Date = .distantPast
-    private var validTokens: Set<String> = []
+    private var validTokens: [String: Date] = [:]
 
     // Per-peer brute-force accounting. Keyed by peer IP (not port) so a
     // determined attacker can't sidestep by rotating source ports.
@@ -227,11 +228,12 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
     private func startListener() {
         do {
             let params = NWParameters.tcp
+            params.requiredInterfaceType = .wifi
             let listener = try NWListener(using: params)
 
             // Bonjour advertising
             listener.service = NWListener.Service(
-                name: Host.current().localizedName ?? "Mac",
+                name: "Open Island",
                 type: Self.serviceType
             )
 
@@ -371,8 +373,12 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
             return
         }
 
+        // Per-peer rate-limit gate is at the top of handlePair via the
+        // pairAttempts ledger; nothing extra to do here.
+        let now = Date()
+
         // Check if pairing code expired
-        if Date().timeIntervalSince(pairingCodeGeneratedAt) > Self.pairingCodeExpiry {
+        if now.timeIntervalSince(pairingCodeGeneratedAt) > Self.pairingCodeExpiry {
             regeneratePairingCodeUnsafe()
             sendHTTPResponse(connection: connection, status: "410 Gone", body: #"{"error":"pairing code expired"}"#)
             return
@@ -384,10 +390,10 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
             return
         }
 
-        // Success: wipe the peer's failure ledger, rotate the code, issue token.
+        // Success: wipe the peer's failure ledger, rotate the code, issue token with TTL.
         pairAttempts.removeValue(forKey: peerIP)
         let token = UUID().uuidString
-        validTokens.insert(token)
+        validTokens[token] = now.addingTimeInterval(Self.tokenExpiry)
         regeneratePairingCodeUnsafe()
 
         let response = WatchPairResponse(token: token)
@@ -503,7 +509,14 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
             return false
         }
         let token = String(auth.dropFirst("Bearer ".count))
-        return validTokens.contains(token)
+        guard let expiry = validTokens[token] else {
+            return false
+        }
+        if Date() > expiry {
+            validTokens.removeValue(forKey: token)
+            return false
+        }
+        return true
     }
 
     // MARK: - Private: Brute-force accounting
@@ -600,6 +613,20 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
         let digits = (0..<Self.pairingCodeLength).map { _ in String(Int.random(in: 0...9)) }
         currentPairingCode = digits.joined()
         pairingCodeGeneratedAt = Date()
+        // Per-peer ledger persists across rotations so attackers can't
+        // reset their failure window by triggering a regen.
+        pruneExpiredTokens()
         Self.logger.info("New pairing code generated")
+    }
+
+    private func pruneExpiredTokens() {
+        let now = Date()
+        let expired = validTokens.filter { $0.value <= now }.map(\.key)
+        for token in expired {
+            validTokens.removeValue(forKey: token)
+        }
+        if !expired.isEmpty {
+            Self.logger.info("Pruned \(expired.count) expired token(s)")
+        }
     }
 }
