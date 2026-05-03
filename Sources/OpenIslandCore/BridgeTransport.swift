@@ -340,6 +340,12 @@ public enum BridgeCodec {
             }
         }
 
+        // Prevent unbounded growth when no newline arrives
+        if buffer.count > 8_388_608 {
+            buffer.removeAll()
+            throw BridgeTransportError.malformedEnvelope
+        }
+
         return messages
     }
 }

@@ -92,10 +92,12 @@ public enum HooksBinaryLocator {
         executableDirectory: URL? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL? {
+        #if DEBUG
         if let explicitPath = environment["OPEN_ISLAND_HOOKS_BINARY"] ?? environment["VIBE_ISLAND_HOOKS_BINARY"],
            fileManager.isExecutableFile(atPath: explicitPath) {
             return URL(fileURLWithPath: explicitPath).standardizedFileURL
         }
+        #endif
 
         let currentDirectory = currentDirectory
             ?? URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
