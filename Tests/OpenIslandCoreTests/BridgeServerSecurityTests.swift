@@ -73,13 +73,4 @@ struct BridgeServerSecurityTests {
         // Verify it doesn't crash on double-stop
         server.stop()
     }
-
-    @Test
-    func sweepTimerIsConfigured() {
-        // Verify the sweep interval constant is reasonable
-        let sweepIntervalSeconds: TimeInterval = 120 // 2 minutes
-        let staleCutoffSeconds: TimeInterval = 600   // 10 minutes
-        #expect(sweepIntervalSeconds > 0)
-        #expect(staleCutoffSeconds > sweepIntervalSeconds)
-    }
 }

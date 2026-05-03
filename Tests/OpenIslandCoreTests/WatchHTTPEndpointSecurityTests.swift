@@ -44,11 +44,11 @@ struct WatchHTTPEndpointSecurityTests {
     }
 
     @Test
-    func httpBodySizeLimitIsEnforced() {
-        // The routeHTTPRequest method rejects requests > 128 KB
-        // with 413 Payload Too Large. We verify this indirectly
-        // through the constant being present in the code.
-        let maxBodySize = 131_072 // 128 KB
-        #expect(maxBodySize == 131_072)
+    func endpointIntegratesWithoutCrashing() {
+        let endpoint = WatchHTTPEndpoint()
+        endpoint.start()
+        // Give the listener a moment on its internal queue
+        Thread.sleep(forTimeInterval: 0.1)
+        endpoint.stop()
     }
 }
