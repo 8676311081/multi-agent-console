@@ -25,6 +25,12 @@ public enum ProfileCardState: Equatable {
     /// UserDefaults, manual key deletion), pane shows an error
     /// banner — better than silently routing to a broken upstream.
     case errorActiveButMissingKey
+    /// Passthrough profiles (keychainAccount == nil) to api.anthropic.com
+    /// will always 401 for Max/Pro OAuth subscribers because Anthropic's
+    /// client-identity check rejects proxied requests. Card renders as
+    /// disabled with a warning — the user needs a Console API key + a
+    /// custom profile, or the claude-native shim (bypasses proxy).
+    case blockedBySubscription
 }
 
 /// Discount-window state for a profile's pricing metadata. Drives
@@ -47,6 +53,13 @@ public enum ModelRoutingDerivation {
         activeProfileId: String,
         hasCredentialFor: (String) -> Bool
     ) -> ProfileCardState {
+        // Passthrough profiles to api.anthropic.com cannot work through
+        // the proxy for Max/Pro OAuth subscribers (Anthropic enforces
+        // client identity verification that rejects proxied requests).
+        // Surface as blocked regardless of active status.
+        if isBlocked(profile) {
+            return .blockedBySubscription
+        }
         let isActive = profile.id == activeProfileId
         let credPresent: Bool = {
             guard let account = profile.keychainAccount else { return true }
@@ -58,6 +71,15 @@ public enum ModelRoutingDerivation {
         case (false, false): return .inactiveAndMissingKey
         case (true, false): return .errorActiveButMissingKey
         }
+    }
+
+    /// True when a passthrough profile (no stored credential) points at
+    /// api.anthropic.com.  Max/Pro OAuth tokens carry client identity
+    /// that Anthropic validates end-to-end; a proxy in the middle
+    /// breaks the check and every request 401s.
+    static func isBlocked(_ profile: UpstreamProfile) -> Bool {
+        profile.keychainAccount == nil
+            && profile.baseURL.host == "api.anthropic.com"
     }
 
     public static func discountState(
@@ -122,6 +144,7 @@ struct ModelRoutingPane: View {
     @State private var configuringProfile: UpstreamProfile?
     @State private var errorBanner: String?
     @State private var showCustomProfileSheet: Bool = false
+    @State private var showAnthropicDisabledAlert: Bool = false
     /// Snapshot of the health monitor refreshed on appear and after
     /// each switch. Live updating (proxy degrading WHILE the pane
     /// is open) is deferred to a future polling-task commit — the
@@ -183,6 +206,12 @@ struct ModelRoutingPane: View {
                 },
                 onCancel: { showCustomProfileSheet = false }
             )
+        }
+        .alert(lang.t("modelRouting.profile.anthropic.native.blockedAlert.title"),
+               isPresented: $showAnthropicDisabledAlert) {
+            Button(lang.t("common.cancel"), role: .cancel) {}
+        } message: {
+            Text(lang.t("modelRouting.profile.anthropic.native.blockedAlert.message"))
         }
     }
 
@@ -321,7 +350,9 @@ struct ModelRoutingPane: View {
         let state = derivedCardState(for: profile)
         switch state {
         case .activeAndConfigured, .errorActiveButMissingKey:
-            return // already active (or in error state — banner handles)
+            return
+        case .blockedBySubscription:
+            showAnthropicDisabledAlert = true
         case .inactiveAndConfigured:
             pendingSwitch = profile
         case .inactiveAndMissingKey:
@@ -360,11 +391,14 @@ struct ModelRoutingPane: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button(lang.t("modelRouting.health.degraded.switchBack")) {
-                switchActive(to: BuiltinProfiles.anthropicNative)
+            let blocked = ModelRoutingDerivation.isBlocked(BuiltinProfiles.anthropicNative)
+            if !blocked {
+                Button(lang.t("modelRouting.health.degraded.switchBack")) {
+                    switchActive(to: BuiltinProfiles.anthropicNative)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
         }
         .padding(12)
         .background(Color.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
@@ -406,6 +440,9 @@ private struct ProfileCard: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 8) {
                 topRow
+                if state == .blockedBySubscription {
+                    warningRow
+                }
                 if let metadata = profile.costMetadata {
                     metadataRows(metadata)
                 }
@@ -421,7 +458,20 @@ private struct ProfileCard: View {
             )
         }
         .buttonStyle(.plain)
-        .opacity(state == .inactiveAndMissingKey ? 0.65 : 1.0)
+        .opacity(state == .inactiveAndMissingKey || state == .blockedBySubscription ? 0.65 : 1.0)
+    }
+
+    private var warningRow: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption2)
+            Text(lang.t("modelRouting.profile.anthropic.native.warning"))
+                .font(.caption2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(.red)
+        .padding(6)
+        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
     }
 
     private var topRow: some View {
@@ -488,6 +538,12 @@ private struct ProfileCard: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.red)
             )
+        case .blockedBySubscription:
+            return AnyView(
+                Text(lang.t("modelRouting.profile.anthropic.native.blockedAction"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.red)
+            )
         }
     }
 
@@ -501,6 +557,8 @@ private struct ProfileCard: View {
             return Color.secondary.opacity(0.10)
         case .errorActiveButMissingKey:
             return Color.red.opacity(0.10)
+        case .blockedBySubscription:
+            return Color.secondary.opacity(0.04)
         }
     }
 
@@ -764,10 +822,39 @@ private struct CustomProfileSheet: View {
         parsedURL?.host?.replacingOccurrences(of: ".", with: "-") ?? "custom"
     }
 
+    private var fetchModelsHelp: String? {
+        if isFetchingModels { return nil }
+        if parsedURL == nil || keyText.isEmpty { return "请先填写有效 URL 和 API Key" }
+        return nil
+    }
+
+    private var testConnectionHelp: String? {
+        if isTesting { return nil }
+        if parsedURL == nil || keyText.isEmpty || effectiveModel.isEmpty {
+            return "请先填写 URL、API Key 和模型"
+        }
+        return nil
+    }
+
+    private var saveHelp: String? {
+        if parsedURL == nil { return "URL 格式不对, 必须是 http:// 或 https:// 开头" }
+        if keyText.count < 20 { return "API Key 至少 20 字符" }
+        if effectiveModel.isEmpty { return "请填写或选择一个模型" }
+        if !DeepSeekKeyValidator.saveAllowed(for: testResult) { return "请先点测试连接验证" }
+        return nil
+    }
+
+    private let instructionText =
+        "依次填写 URL、API Key、模型。三项齐全后可测试连接,通过后保存。"
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(lang.t("modelRouting.customSheet.title"))
                 .font(.headline)
+
+            Text(instructionText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             // URL
             VStack(alignment: .leading, spacing: 4) {
@@ -778,10 +865,22 @@ private struct CustomProfileSheet: View {
                     text: $urlText
                 )
                 .textFieldStyle(.roundedBorder)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(
+                            !urlText.isEmpty && parsedURL == nil ? Color.red : Color.clear,
+                            lineWidth: 1
+                        )
+                )
                 .onChange(of: urlText) { _, _ in
                     testResult = nil
                     fetchedModels = nil
                     fetchError = nil
+                }
+                if !urlText.isEmpty && parsedURL == nil {
+                    Text("URL 格式不对")
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
             }
 
@@ -794,6 +893,11 @@ private struct CustomProfileSheet: View {
                     .onChange(of: keyText) { _, _ in
                         testResult = nil
                     }
+                if keyText.count < 20 {
+                    Text("已输入 \(keyText.count)/20 字符")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             // Model
@@ -830,6 +934,7 @@ private struct CustomProfileSheet: View {
                         }
                     }
                     .disabled(parsedURL == nil || keyText.isEmpty || isFetchingModels)
+                    .help(fetchModelsHelp ?? "")
                     if let error = fetchError {
                         Text(error)
                             .font(.caption)
@@ -856,10 +961,12 @@ private struct CustomProfileSheet: View {
                     }
                 }
                 .disabled(parsedURL == nil || keyText.isEmpty || effectiveModel.isEmpty || isTesting)
+                .help(testConnectionHelp ?? "")
                 Button(lang.t("modelRouting.keySheet.save"), action: save)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .disabled(!canSave)
+                    .help(saveHelp ?? "")
             }
         }
         .padding(20)
