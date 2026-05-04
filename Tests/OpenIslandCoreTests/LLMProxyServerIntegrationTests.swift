@@ -24,7 +24,8 @@ struct LLMProxyServerIntegrationTests {
     /// and removing the store URL.
     private static func makeServer(
         anthropicMock: URL = URL(string: "https://api.anthropic.com")!,
-        openAIMock: URL = URL(string: "https://api.openai.com")!
+        openAIMock: URL = URL(string: "https://api.openai.com")!,
+        profileResolver: (any UpstreamProfileResolver)? = nil
     ) async throws -> (LLMProxyServer, LLMStatsStore, UInt16, URL) {
         let storeURL = makeTempStoreURL()
         let store = LLMStatsStore(url: storeURL)
@@ -34,7 +35,8 @@ struct LLMProxyServerIntegrationTests {
                 anthropicUpstream: anthropicMock,
                 openAIUpstream: openAIMock
             ),
-            additionalProtocolClasses: [MockUpstreamProtocol.self]
+            additionalProtocolClasses: [MockUpstreamProtocol.self],
+            profileResolver: profileResolver
         )
         let observer = LLMUsageObserver(store: store)
         server.setObserver(observer)
@@ -486,6 +488,71 @@ struct LLMProxyServerIntegrationTests {
                 "outbound Accept-Encoding was \(acceptEnc), expected identity")
     }
 
+    // MARK: - (g) Anthropic OAuth-passthrough gate returns 409
+
+    /// When the active profile resolves to an Anthropic-passthrough
+    /// (no keychain account, host is api.anthropic.com), the proxy
+    /// must short-circuit with 409 instead of forwarding — Anthropic
+    /// enforces end-to-end client identity verification on Max/Pro
+    /// OAuth tokens, so the request would always 401 after a full
+    /// round-trip. The 409 carries an actionable error pointing the
+    /// user at the `claude-native` shim.
+    @Test
+    func anthropicPassthroughBlockedReturns409BeforeForwarding() async throws {
+        let resolver = BlockedAnthropicNativeResolver()
+        let (server, store, port, storeURL) = try await Self.makeServer(
+            profileResolver: resolver
+        )
+        defer { Self.teardown(server, storeURL) }
+
+        let upstreamReached = UpstreamReachFlag()
+        MockUpstreamProtocol.setResponder { _ in
+            upstreamReached.set()
+            return MockUpstreamProtocol.Response(
+                statusCode: 200, headers: [:], bodyChunks: [Data()]
+            )
+        }
+
+        var req = URLRequest(url: Self.proxyURL(port: port, path: "/v1/messages"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // OAuth token shape (sk-ant-oat) is what claude CLI sends for a
+        // Max/Pro subscriber. We don't pattern-match on the value — the
+        // gate is profile-based — but using a realistic token here makes
+        // the test fixture self-documenting about why this case matters.
+        req.setValue("Bearer sk-ant-oat01-test-token", forHTTPHeaderField: "Authorization")
+        req.httpBody = Data(#"{"model":"claude-opus-4-7","messages":[]}"#.utf8)
+
+        let (data, response) = try await Self.makeClientSession().data(for: req)
+        let http = response as? HTTPURLResponse
+        #expect(http?.statusCode == 409, "expected 409 Conflict, got \(http?.statusCode ?? -1)")
+        let bodyString = String(data: data, encoding: .utf8) ?? ""
+        #expect(bodyString.contains("open_island_oauth_blocked"))
+        #expect(bodyString.contains("claude-native"))
+        #expect(!upstreamReached.didReach,
+                "upstream must NOT be reached when gate fires")
+        _ = store
+    }
+
+    /// Healthz endpoint is for liveness probes and intentionally
+    /// pre-empts upstream resolution at line 1 of `handleParsedRequest`.
+    /// Verify the gate doesn't accidentally swallow it when a blocked
+    /// profile is active.
+    @Test
+    func anthropicPassthroughBlockedDoesNotAffectHealthz() async throws {
+        let resolver = BlockedAnthropicNativeResolver()
+        let (server, _, port, storeURL) = try await Self.makeServer(
+            profileResolver: resolver
+        )
+        defer { Self.teardown(server, storeURL) }
+
+        let req = URLRequest(url: Self.proxyURL(port: port, path: "/healthz"))
+        let (data, response) = try await Self.makeClientSession().data(for: req)
+        let http = response as? HTTPURLResponse
+        #expect(http?.statusCode == 200)
+        #expect(String(data: data, encoding: .utf8) == "ok\n")
+    }
+
     // MARK: - Helpers
 
     private static func drainStream(_ stream: InputStream) -> Data {
@@ -520,6 +587,19 @@ private final class CapturedHeaders: @unchecked Sendable {
     private var headers: [String: String] = [:]
     func set(_ v: [String: String]) { lock.lock(); headers = v; lock.unlock() }
     var value: [String: String] { lock.lock(); defer { lock.unlock() }; return headers }
+}
+
+/// Stand-in for `UpstreamProfileStore` in router-gate tests. Always
+/// resolves to the built-in Anthropic-native profile (`baseURL =
+/// api.anthropic.com`, `keychainAccount = nil`) — the canonical
+/// "blocked" shape that triggers `isAnthropicPassthroughBlocked`.
+private struct BlockedAnthropicNativeResolver: UpstreamProfileResolver {
+    func profileMatching(url: URL) -> UpstreamProfile? {
+        BuiltinProfiles.anthropicNative
+    }
+    func currentActiveProfile() -> UpstreamProfile {
+        BuiltinProfiles.anthropicNative
+    }
 }
 
 /// Tracks whether the mock upstream was ever invoked. Used by the

@@ -385,7 +385,16 @@ public final class LLMProxyServer: @unchecked Sendable {
         )
         let upstreamBase: URL
         switch upstream {
-        case .anthropic: upstreamBase = resolvedAnthropicUpstream()
+        case .anthropic:
+            upstreamBase = resolvedAnthropicUpstream()
+            if isAnthropicPassthroughBlocked(upstreamBase: upstreamBase) {
+                respondLocally(
+                    state: state,
+                    status: 409,
+                    body: Self.anthropicOAuthBlockedBody
+                )
+                return
+            }
         case .openai: upstreamBase = configuration.openAIUpstream
         case .unknown:
             respondLocally(
@@ -471,6 +480,42 @@ public final class LLMProxyServer: @unchecked Sendable {
         }
         return active.baseURL
     }
+
+    /// Mirror of `ModelRoutingDerivation.isBlocked` on the router
+    /// hot path. A "blocked" Anthropic request is one that would
+    /// be forwarded to `api.anthropic.com` carrying whatever
+    /// Authorization header claude CLI happens to send — typically
+    /// a Max/Pro OAuth token. Anthropic enforces end-to-end client
+    /// identity verification on those tokens, so the request always
+    /// 401s after a full round-trip; surfacing it as 409 here gives
+    /// the user an actionable error pointing at the `claude-native`
+    /// shim (which talks straight to api.anthropic.com without
+    /// proxying).
+    ///
+    /// Self-hosted-gateway escape hatch is preserved: when the user
+    /// has overridden `configuration.anthropicUpstream` away from
+    /// the default `api.anthropic.com`, `resolvedAnthropicUpstream`
+    /// already returns that override, so the host check below fails
+    /// and we forward as usual.
+    ///
+    /// Returns `false` when `profileResolver == nil` (legacy callers
+    /// without routing) — those paths trust the static config and
+    /// shouldn't be regulated retroactively.
+    private func isAnthropicPassthroughBlocked(upstreamBase: URL) -> Bool {
+        guard let resolver = profileResolver else { return false }
+        guard upstreamBase.host?.lowercased() == "api.anthropic.com" else {
+            return false
+        }
+        return resolver.currentActiveProfile().keychainAccount == nil
+    }
+
+    /// 409 body returned when `isAnthropicPassthroughBlocked` fires.
+    /// JSON shape mirrors Anthropic's `{"type":"error","error":{...}}`
+    /// envelope so well-behaved clients log it at the same call site
+    /// they log upstream errors. The `error.type` namespace is
+    /// `open_island_*` so a grep distinguishes proxy-side gates from
+    /// upstream-issued errors.
+    static let anthropicOAuthBlockedBody = #"{"type":"error","error":{"type":"open_island_oauth_blocked","message":"Anthropic OAuth credentials cannot pass through Open Island. Anthropic enforces end-to-end client identity verification on Max/Pro tokens which the proxy cannot relay. Run `claude` via the `claude-native` shim (~/.open-island/bin/claude-native) to bypass the proxy, or activate a profile with a stored API key (e.g. DeepSeek V4 Pro) in the routing pane."}}"#
 
     // MARK: - Forwarding
 
@@ -587,6 +632,7 @@ public final class LLMProxyServer: @unchecked Sendable {
         case 403: "Forbidden"
         case 404: "Not Found"
         case 408: "Request Timeout"
+        case 409: "Conflict"
         case 413: "Payload Too Large"
         case 421: "Misdirected Request"
         case 429: "Too Many Requests"
