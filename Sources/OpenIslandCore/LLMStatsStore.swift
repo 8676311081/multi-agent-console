@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - Snapshot model
 
@@ -433,11 +434,17 @@ public actor LLMStatsStore {
     }
 
     private func persist() {
-        try? LLMProxySupportPaths.ensureDirectoryExists()
-        guard let data = try? Self.encoder.encode(snapshot) else { return }
-        // `.atomic` writes to a `.tmp` sibling and renames — same atomic
-        // semantic the spec asked for, just delegated to Foundation.
-        try? data.write(to: url, options: [.atomic])
+        if (try? LLMProxySupportPaths.ensureDirectoryExists()) == nil {
+            os_log(.error, "Failed to create LLM stats directory")
+            return
+        }
+        guard let data = try? Self.encoder.encode(snapshot) else {
+            os_log(.error, "Failed to encode LLM stats snapshot")
+            return
+        }
+        if (try? data.write(to: url, options: [.atomic])) == nil {
+            os_log(.error, "Failed to write LLM stats to %{public}@", url.path)
+        }
     }
 
     private static let encoder: JSONEncoder = {

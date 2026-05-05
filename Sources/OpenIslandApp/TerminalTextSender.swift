@@ -1,5 +1,6 @@
 import Foundation
 import OpenIslandCore
+import OSLog
 
 /// Sends reply text to a terminal where an agent session is running.
 ///
@@ -217,7 +218,9 @@ struct TerminalTextSender {
             if let output, FileManager.default.isExecutableFile(atPath: output) {
                 return output
             }
-        } catch {}
+        } catch {
+            os_log(.error, "which tmux failed: %{public}@", error.localizedDescription)
+        }
         return nil
     }
 

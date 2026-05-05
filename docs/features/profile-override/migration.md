@@ -28,16 +28,34 @@ Console, but broke transparently for two real cases:
    couldn't simultaneously run a DeepSeek script without first
    alt-tabbing to the GUI and clicking a different card.
 
-The new design replaces the global hijack with two discrete commands:
+The new design replaces the global hijack with discrete commands —
+the command name itself decides the backend, no environment-variable
+flipping required:
 
 | Command | What it does | Use when |
 |---|---|---|
 | `claude` | The official binary, untouched. Direct-connects to `api.anthropic.com` with the ambient OAuth credential. | Max/Pro subscription |
-| `claude-3` | Goes through the Open Island proxy. Uses the GUI-active profile by default. `OI_PROFILE=<id>` overrides for one invocation. | API-key routing (DeepSeek, BuerAI, custom) |
+| `claude-3` | Goes through the Open Island proxy. Uses the GUI-active profile by default — whatever card is highlighted in the routing pane is what handles the request. `OI_PROFILE=<id>` overrides for one invocation (advanced). | API-key routing to whatever is active (BuerAI, custom Pro/Flash, etc.) |
+| `claude-deep` | Goes through the proxy with a **family lock**: the GUI-active card must be a `deepseek-*` profile. If the active card is anything else (BuerAI, anthropic-native), the proxy returns a 400 telling you to either switch the active card or fall back to `claude-3`. | You want certainty: `claude-deep` always means DeepSeek. Pairs cleanly with `claude` (Anthropic) and `claude-3` (everything else). |
 
 `claude-native` and `oi-claude` stay in `~/.open-island/bin/` for one
 release as compatibility aliases — they keep working unchanged for
 any scripts that already invoke them.
+
+### The advanced `OI_PROFILE` knob
+
+Both `claude-3` and `claude-deep` honor `OI_PROFILE=<id>` as a
+per-invocation override. When set, it points at a specific profile id
+(`deepseek-v4-pro`, `buerai-...`, `anthropic-native`, or any custom
+id from the routing pane) for that one call only. It does **not**
+change the GUI-active card, so concurrent terminals are unaffected.
+
+Most users do not need this. The command names already do most of
+what people care about. Reach for `OI_PROFILE` only when you want a
+single command line to use a profile other than what is currently
+GUI-active — typically because you are running a comparison script or
+two terminals need different profiles within the same family at the
+same time.
 
 ## Migration in 5 steps
 
@@ -171,10 +189,33 @@ curl -sS -m 3 -X POST 'http://127.0.0.1:9710/_oi/profile/totally-bogus/v1/messag
 | Goal | Command |
 |---|---|
 | Use Anthropic Max / Pro subscription | `claude …` (plain — no env, no shim) |
-| Use whatever the GUI-active card says | `claude-3 …` |
+| Use the DeepSeek card you have GUI-active | `claude-deep …` |
+| Use whatever the GUI-active card says (any backend) | `claude-3 …` |
 | Use DeepSeek V4 Pro just for this run | `OI_PROFILE=deepseek-v4-pro claude-3 …` |
 | Use BuerAI Pro just for this run | `OI_PROFILE=buerai-<your-id> claude-3 …` (id from the routing pane) |
 | List the profile ids you have | Send a request with a bogus `OI_PROFILE` — the 400 response carries the `available` list |
+
+### What if I run `claude-deep` and the active card is BuerAI?
+
+You get a 400 with a structured error body:
+
+```json
+{
+  "type": "error",
+  "error": {
+    "type": "open_island_family_mismatch",
+    "required_family": "deepseek",
+    "active_profile_id": "buerai-pro-xxxx",
+    "matching_available": ["deepseek-v4-flash", "deepseek-v4-pro"],
+    "message": "claude-deep requires the `deepseek` family to be GUI-active (any profile whose id starts with `deepseek-`), but the active profile is `buerai-pro-xxxx`. Pick a matching profile in the routing pane, or use `claude-3` which has no family constraint."
+  }
+}
+```
+
+Two valid responses:
+
+1. Switch the GUI-active card to a `deepseek-*` profile in the routing pane and retry.
+2. Use `claude-3` instead — it has no family constraint and will route to whatever is currently active.
 
 ## If something feels off after the migration
 

@@ -26,6 +26,8 @@
 #                    touch — Anthropic Max/Pro client identity check
 #                    fails through any proxy).
 #   claude-native  — explicitly bypass the proxy for ambient OAuth.
+#   claude-deep    — proxy routing locked to the DeepSeek family;
+#                    400s if the GUI-active card is not deepseek-*.
 #   oi-claude      — legacy alias for proxy routing without the
 #                    OI_PROFILE override knob; will deprecate after
 #                    one release in favor of claude-3.

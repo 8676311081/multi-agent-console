@@ -126,16 +126,17 @@ swift build && swift run OpenIslandApp
 
 Requires macOS 14+. Supports Apple Silicon and Intel.
 
-### Model routing — claude / claude-3 / OI_PROFILE
+### Model routing — claude / claude-deep / claude-3
 
 Open Island runs a local proxy on `127.0.0.1:9710` for cross-provider
-routing + spend tracking. Three commands map to three intents:
+routing + spend tracking. The command name decides the backend:
 
 | Command | What it does |
 |---|---|
 | `claude …` | Official binary, untouched. Direct OAuth to api.anthropic.com — use for Anthropic Max / Pro subscriptions. |
-| `claude-3 …` | Goes through the proxy with the GUI-active profile. |
-| `OI_PROFILE=<id> claude-3 …` | Per-invocation override — pick a different profile (e.g. `deepseek-v4-pro`) just for this call without touching the GUI selection. |
+| `claude-deep …` | Goes through the proxy with a **family lock**: the GUI-active card must be a `deepseek-*` profile. Returns 400 with a clear hint if the active card is anything else. |
+| `claude-3 …` | Goes through the proxy with the GUI-active profile, no family constraint. Whatever card is highlighted in the routing pane handles the request. |
+| `OI_PROFILE=<id> claude-3 …` (advanced) | Per-invocation override — pick a different profile (e.g. `deepseek-v4-pro`) for one call without touching the GUI selection. Works with `claude-deep` too. |
 
 Migrating from the legacy `~/.zshrc` `claude()` hijack? See
 [docs/features/profile-override/migration.md](docs/features/profile-override/migration.md).

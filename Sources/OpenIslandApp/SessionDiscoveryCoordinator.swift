@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Observation
 import OpenIslandCore
 
@@ -107,13 +108,19 @@ final class SessionDiscoveryCoordinator {
     func applyStartupDiscoveryPayload(_ payload: StartupDiscoveryPayload) {
         // Prune stale records if needed.
         if payload.codexRecordsNeedPrune {
-            try? codexSessionStore.save(payload.codexRecords)
+            if (try? codexSessionStore.save(payload.codexRecords)) == nil {
+                os_log(.error, "Failed to save pruned Codex session records")
+            }
         }
         if payload.claudeRecordsNeedPrune {
-            try? claudeSessionRegistry.save(payload.claudeRecords)
+            if (try? claudeSessionRegistry.save(payload.claudeRecords)) == nil {
+                os_log(.error, "Failed to save pruned Claude session records")
+            }
         }
         if payload.cursorRecordsNeedPrune {
-            try? cursorSessionRegistry.save(payload.cursorRecords)
+            if (try? cursorSessionRegistry.save(payload.cursorRecords)) == nil {
+                os_log(.error, "Failed to save pruned Cursor session records")
+            }
         }
 
         // Restore persisted Codex sessions.

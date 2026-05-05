@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Observation
 import OpenIslandCore
 
@@ -460,6 +461,7 @@ final class HookInstallationCoordinator {
         "claude-native",
         "oi-claude",
         "claude-3",
+        "claude-deep",
     ]
 
     /// Copy bundled CLI shims to `~/.open-island/bin/`. Idempotent:
@@ -480,6 +482,16 @@ final class HookInstallationCoordinator {
         let targetDir = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent(".open-island", isDirectory: true)
             .appendingPathComponent("bin", isDirectory: true)
+            .resolvingSymlinksInPath()
+
+        // Guard against symlink attacks: after resolving symlinks,
+        // the target directory must still be within the user's home.
+        let homeDir = fileManager.homeDirectoryForCurrentUser
+            .resolvingSymlinksInPath()
+        guard targetDir.path.hasPrefix(homeDir.path + "/") else {
+            onStatusMessage?("Shim target directory is outside home directory — refusing to install")
+            return
+        }
 
         try? fileManager.createDirectory(at: targetDir, withIntermediateDirectories: true)
 
@@ -1212,7 +1224,12 @@ final class HookInstallationCoordinator {
     /// `.installedEnabled`. Cheap (no network). Safe to call from
     /// anywhere — `ensureRtkRuntimeWired()` is idempotent.
     func refreshRtkStatus() {
-        rtkStatus = try? rtkInstallationManager.status()
+        do {
+            rtkStatus = try rtkInstallationManager.status()
+        } catch {
+            os_log(.error, "Failed to read RTK status: %{public}@", error.localizedDescription)
+            rtkStatus = nil
+        }
         ensureRtkRuntimeWired()
     }
 

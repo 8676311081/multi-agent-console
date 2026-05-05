@@ -560,6 +560,165 @@ struct LLMProxyActiveProfileRoutingTests {
         #expect(snapshots[1].profileSelectionSource == .activeDefault)
     }
 
+    /// claude-deep family sentinel — same shape and edge cases as
+    /// `parseSentinel`, exercised against the parallel parser.
+    @Test
+    func familySentinelParser() {
+        // Happy path.
+        let a = LLMProxyServer.parseFamilySentinel(path: "/_oi/family/deepseek/v1/messages")
+        #expect(a.requiredFamily == "deepseek")
+        #expect(a.requestPath == "/v1/messages")
+
+        // No sentinel — pass through unchanged.
+        let b = LLMProxyServer.parseFamilySentinel(path: "/v1/messages")
+        #expect(b.requiredFamily == nil)
+        #expect(b.requestPath == "/v1/messages")
+
+        // Sentinel without trailing path.
+        let c = LLMProxyServer.parseFamilySentinel(path: "/_oi/family/deepseek")
+        #expect(c.requiredFamily == "deepseek")
+        #expect(c.requestPath == "/")
+
+        // Empty family — degrade to no sentinel.
+        let d = LLMProxyServer.parseFamilySentinel(path: "/_oi/family//v1/messages")
+        #expect(d.requiredFamily == nil)
+        #expect(d.requestPath == "/_oi/family//v1/messages")
+
+        // Profile sentinel must NOT be mistaken for a family sentinel.
+        let e = LLMProxyServer.parseFamilySentinel(path: "/_oi/profile/deepseek-v4-pro/v1/messages")
+        #expect(e.requiredFamily == nil)
+
+        // Healthz reachable through the family prefix — same
+        // short-circuit shape as profile sentinel.
+        let f = LLMProxyServer.parseFamilySentinel(path: "/_oi/family/deepseek/healthz")
+        #expect(f.requiredFamily == "deepseek")
+        #expect(f.requestPath == "/healthz")
+    }
+
+    @Test
+    func familySentinelRoutesToActiveDeepseekProfile() async throws {
+        // claude-deep happy path: GUI active is a deepseek-* card,
+        // family sentinel matches → request forwards to that profile's
+        // upstream as `.activeDefault` (NOT `.perRequestOverride` —
+        // the constraint just asserts the active fits the family;
+        // it does not override anything).
+        let suiteName = "OpenIsland.LLMProxy.test.\(UUID().uuidString)"
+        let store = Self.makeStore(suiteName: suiteName)
+        try store.setActiveProfile(BuiltinProfiles.deepseekV4Flash.id)
+        let observer = ContextCapturingObserver()
+        let (server, port) = try await Self.makeServer(profileResolver: store)
+        server.setObserver(observer)
+        defer {
+            server.stop()
+            CaptureMockProtocol.disable()
+            UserDefaults().removePersistentDomain(forName: suiteName)
+        }
+
+        let url = URL(string: "http://127.0.0.1:\(port)/_oi/family/deepseek/v1/messages")!
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.httpBody = Data(#"{"model":"claude-opus-4-7","max_tokens":1,"messages":[]}"#.utf8)
+        _ = try await Self.makeClientSession().data(for: req)
+
+        let captures = await CaptureMockProtocol.waitForCaptureCount(1)
+        #expect(captures.count == 1)
+        #expect(captures.first?.url.host == "api.deepseek.com",
+                "family-sentinel routed request must reach the active deepseek profile's upstream; got \(captures.first?.url.host ?? "nil")")
+        #expect(captures.first?.url.path == "/anthropic/v1/messages",
+                "upstream must NOT see the /_oi/family prefix; got \(captures.first?.url.path ?? "nil")")
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let snapshots = await observer.snapshots()
+        #expect(snapshots.first?.resolvedProfileId == BuiltinProfiles.deepseekV4Flash.id)
+        #expect(snapshots.first?.profileSelectionSource == .activeDefault)
+    }
+
+    @Test
+    func familySentinelReturns400WhenActiveIsNotInFamily() async throws {
+        // claude-deep error path: GUI active is anthropic-native (id
+        // does NOT have prefix `deepseek-`) → proxy must respond 400
+        // with structured `open_island_family_mismatch` body. Upstream
+        // must NOT be contacted.
+        let suiteName = "OpenIsland.LLMProxy.test.\(UUID().uuidString)"
+        let store = Self.makeStore(suiteName: suiteName)
+        // Active = anthropic-native (default — no setActiveProfile call).
+        let (server, port) = try await Self.makeServer(profileResolver: store)
+        defer {
+            server.stop()
+            CaptureMockProtocol.disable()
+            UserDefaults().removePersistentDomain(forName: suiteName)
+        }
+
+        let url = URL(string: "http://127.0.0.1:\(port)/_oi/family/deepseek/v1/messages")!
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.httpBody = Data(#"{"model":"claude-opus-4-7","max_tokens":1,"messages":[]}"#.utf8)
+
+        let (data, response) = try await Self.makeClientSession().data(for: req)
+        let http = response as? HTTPURLResponse
+        #expect(http?.statusCode == 400, "expected 400, got \(http?.statusCode ?? -1)")
+
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let errorObj = json?["error"] as? [String: Any]
+        #expect(errorObj?["type"] as? String == "open_island_family_mismatch")
+        #expect(errorObj?["required_family"] as? String == "deepseek")
+        #expect(errorObj?["active_profile_id"] as? String == BuiltinProfiles.anthropicNative.id)
+
+        // matching_available should list the deepseek-* registered ids.
+        let matching = errorObj?["matching_available"] as? [String]
+        #expect(matching?.contains(BuiltinProfiles.deepseekV4Pro.id) == true)
+        #expect(matching?.contains(BuiltinProfiles.deepseekV4Flash.id) == true)
+        #expect(matching?.contains(BuiltinProfiles.anthropicNative.id) == false,
+                "anthropic-native must NOT be listed under matching_available for family=deepseek")
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let captures = CaptureMockProtocol.currentCaptures()
+        #expect(captures.isEmpty, "upstream must not be contacted on family-mismatch 400 — got \(captures.count) captures")
+    }
+
+    @Test
+    func familySentinelOIProfileOverrideBypassesFamilyCheck() async throws {
+        // claude-deep with `OI_PROFILE=<other-id>` set: shim emits
+        // `/_oi/profile/<id>` (NOT `/_oi/family/...`), so the family
+        // check is never engaged. This test does not invoke the shim
+        // itself — it asserts the proxy semantics that make the shim's
+        // override branch work: a profile sentinel always wins, even
+        // when the chosen id is outside the deepseek family. Active is
+        // anthropic-native (which would fail the family check) and the
+        // override targets anthropic-native too — request reaches the
+        // anthropic upstream, no 400.
+        let suiteName = "OpenIsland.LLMProxy.test.\(UUID().uuidString)"
+        let store = Self.makeStore(suiteName: suiteName)
+        let nativeGateway = URL(string: "https://native-gateway.example")!
+        let observer = ContextCapturingObserver()
+        let (server, port) = try await Self.makeServer(
+            profileResolver: store,
+            anthropicUpstream: nativeGateway
+        )
+        server.setObserver(observer)
+        defer {
+            server.stop()
+            CaptureMockProtocol.disable()
+            UserDefaults().removePersistentDomain(forName: suiteName)
+        }
+
+        // Override id is anthropic-native; no family prefix in the URL.
+        try await Self.sendAnthropicRequestWithOverride(
+            port: port,
+            overrideId: BuiltinProfiles.anthropicNative.id
+        )
+        let captures = await CaptureMockProtocol.waitForCaptureCount(1)
+        #expect(captures.count == 1)
+        #expect(captures.first?.url.host == "native-gateway.example",
+                "OI_PROFILE override must reach the override profile's upstream regardless of family")
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let snapshots = await observer.snapshots()
+        #expect(snapshots.first?.profileSelectionSource == .perRequestOverride)
+    }
+
     @Test
     func initWithoutResolverFallsBackToConfiguration() async throws {
         // Backward compat — older test setups (LLMProxyServer

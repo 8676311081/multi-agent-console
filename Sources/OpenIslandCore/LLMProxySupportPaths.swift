@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 
 /// Filesystem layout for the local LLM proxy.
 ///
@@ -34,12 +35,18 @@ public enum LLMProxySupportPaths {
 
 public enum LLMProxyPIDFile {
     public static func write(pid: Int32 = getpid(), to url: URL = LLMProxySupportPaths.pidFileURL) {
-        try? LLMProxySupportPaths.ensureDirectoryExists()
-        let payload = "\(pid)\n"
-        try? payload.data(using: .utf8)?.write(to: url, options: .atomic)
+        do {
+            try LLMProxySupportPaths.ensureDirectoryExists()
+            let payload = "\(pid)\n"
+            try payload.data(using: .utf8)?.write(to: url, options: .atomic)
+        } catch {
+            os_log(.error, "Failed to write LLM proxy PID file: %{public}@", error.localizedDescription)
+        }
     }
 
     public static func clear(at url: URL = LLMProxySupportPaths.pidFileURL) {
-        try? FileManager.default.removeItem(at: url)
+        if (try? FileManager.default.removeItem(at: url)) == nil {
+            os_log(.error, "Failed to clear LLM proxy PID file: %{public}@", url.path)
+        }
     }
 }

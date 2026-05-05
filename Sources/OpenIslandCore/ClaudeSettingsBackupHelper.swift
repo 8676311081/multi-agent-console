@@ -168,6 +168,7 @@ public enum ClaudeSettingsBackupHelper {
             try block(&settings)
             let data = try serializeSettings(settings)
             try data.write(to: url, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             return backup
         }
     }
@@ -197,6 +198,7 @@ public enum ClaudeSettingsBackupHelper {
             case .write(let data):
                 let backup = try backupIfExists(at: url, fileManager: fileManager)
                 try data.write(to: url, options: .atomic)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
                 return backup
             case .delete:
                 let backup = try backupIfExists(at: url, fileManager: fileManager)

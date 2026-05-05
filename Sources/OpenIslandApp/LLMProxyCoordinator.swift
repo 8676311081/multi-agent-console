@@ -87,18 +87,41 @@ final class LLMProxyCoordinator {
         return URL(string: fallback)!
     }
 
-    /// Accepts only http/https URLs with a host. Anything else falls
-    /// back to the default — protects against pasting paths with
-    /// scheme typos that would otherwise fail at request time.
+    /// Accepts only https URLs with a public host. Private / loopback
+    /// / link-local hosts are rejected to prevent SSRF via custom
+    /// upstream URLs pointing at internal services.
     static func validatedUpstream(_ raw: String) -> URL? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               let url = URL(string: trimmed),
               let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              let host = url.host, !host.isEmpty
+              scheme == "https",
+              let host = url.host, !host.isEmpty,
+              !Self.isPrivateOrLoopback(host: host)
         else { return nil }
         return url
+    }
+
+    private static func isPrivateOrLoopback(host: String) -> Bool {
+        let lower = host.lowercased()
+        if lower == "localhost" || lower == "127.0.0.1" || lower == "::1" {
+            return true
+        }
+        // Quick check for common metadata hostnames
+        if lower.hasSuffix(".internal") || lower.hasSuffix(".local") {
+            return true
+        }
+        // Check IPv4 private / link-local ranges via simple prefix match
+        let octets = lower.split(separator: ".").compactMap { UInt8($0) }
+        if octets.count == 4 {
+            if octets[0] == 10 { return true }
+            if octets[0] == 172, (16...31).contains(octets[1]) { return true }
+            if octets[0] == 192, octets[1] == 168 { return true }
+            if octets[0] == 169, octets[1] == 254 { return true }
+            if octets[0] == 100, (64...127).contains(octets[1]) { return true }
+            if octets[0] == 0 { return true }
+        }
+        return false
     }
 
     func start() {

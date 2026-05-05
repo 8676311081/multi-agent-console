@@ -128,28 +128,33 @@ Open `Package.swift` in Xcode for the app target. Requires macOS 14+, Swift 6.2.
 Open Island runs a local HTTP proxy on `127.0.0.1:9710` in front of `claude` /
 `codex` CLIs for two purposes: cross-provider request rewriting (so the same
 Claude CLI call can hit Anthropic / DeepSeek / BuerAI / Console-API / custom
-upstreams) and spend tracking. Per-invocation profile override is wired in via
-a URL sentinel — the `claude-3` shim emits
-`/_oi/profile/<id>/v1/messages` and the proxy strips the prefix at request
-entry, then resolves the profile by id.
+upstreams) and spend tracking. Profile selection is wired in via two parallel
+URL sentinels: `claude-3` emits `/_oi/profile/<id>/v1/messages` (per-id
+override from `$OI_PROFILE`); `claude-deep` emits
+`/_oi/family/deepseek/v1/messages` (family lock — proxy enforces that the
+GUI-active profile id has prefix `deepseek-`, else 400).
 
-Three user-facing commands:
+User-facing commands — name decides the backend:
 
 | Command | Routes through proxy? | Profile selection |
 |---|---|---|
 | `claude` | No — official binary, unmodified, OAuth direct connect | n/a (Anthropic Max/Pro subscription path) |
-| `claude-3` | Yes | Uses the GUI-active profile from the routing pane |
-| `OI_PROFILE=<id> claude-3` | Yes | Per-call override — `<id>` from the available registry |
+| `claude-deep` | Yes | GUI-active card, **must be `deepseek-*`** (else 400 family-mismatch) |
+| `claude-3` | Yes | GUI-active card, any family |
+| `OI_PROFILE=<id> claude-3` (or `claude-deep`) | Yes | Per-call override — bypasses the family lock when set on `claude-deep` |
 
 Key files (do NOT call `currentActiveProfile()` on the request hot path; the
 proxy resolves it once at entry and threads `ResolvedProfile` through):
 
 - `Sources/OpenIslandCore/LLMProxyServer.swift` — `handleParsedRequest`,
-  `parseSentinel(path:)`, `upstreamForAnthropic(resolved:)`,
+  `parseSentinel(path:)`, `parseFamilySentinel(path:)`,
+  `upstreamForAnthropic(resolved:)`,
   `isAnthropicPassthroughBlocked(upstreamBase:resolved:)`,
-  `makeUnknownOverrideBody(id:available:)`
+  `makeUnknownOverrideBody(id:available:)`,
+  `makeFamilyMismatchBody(requiredFamily:activeId:matchingAvailable:)`
 - `Sources/OpenIslandCore/UpstreamProfileStore.swift` — `ResolvedProfile`,
   `ProfileSelectionSource`, `resolveProfile(overrideId:)`,
+  `resolveProfile(requiringFamily:)`,
   `profile(id:)`, `availableProfileIds()`
 - `Sources/OpenIslandCore/LLMRequestRewriter.swift` — direct-profile overloads
   for auth + body model rewrite (`profile:` arg variants are the canonical
@@ -157,11 +162,11 @@ proxy resolves it once at entry and threads `ResolvedProfile` through):
 - `Sources/OpenIslandApp/HookInstallationCoordinator.swift` —
   `bundledShimNames` + `ensureShimsInstalled` (flat-bundle lookup; SPM
   `.process("Resources")` flattens the source `Resources/bin/` subtree)
-- `Sources/OpenIslandApp/Resources/bin/{claude-native,oi-claude,claude-3}` —
-  the three shims; `oi-claude` is a deprecation-period alias for `claude-3`
+- `Sources/OpenIslandApp/Resources/bin/{claude-native,oi-claude,claude-3,claude-deep}` —
+  the four shims; `oi-claude` is a deprecation-period alias for `claude-3`
 - `docs/features/profile-override/architecture.md` — full design rationale
 - `docs/features/profile-override/migration.md` — user dotfile cleanup guide
-  (legacy `~/.zshrc claude()` hijack → `claude-3`)
+  + `claude-deep` family-lock semantics
 
 Per-request invariant: profile resolution happens **once** in
 `handleParsedRequest` (`profileResolver?.resolveProfile(overrideId:)`) and

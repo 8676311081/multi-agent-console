@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Periodic check that the RTK binary is still on disk. If it disappears
 /// (user `rm`'d it manually, FS corruption, anti-virus quarantine, etc.)
@@ -94,7 +95,9 @@ public final class RTKWatchdog: @unchecked Sendable {
             let bin = manager.binaryURL
             if fileManager.isExecutableFile(atPath: bin.path) { return }
             // Binary missing — clean up the orphaned hook + wrapper.
-            _ = try? manager.handleBinaryLoss()
+            if (try? manager.handleBinaryLoss()) == nil {
+                os_log(.error, "Failed to clean up orphaned hooks after RTK binary loss")
+            }
         }
     }
 }

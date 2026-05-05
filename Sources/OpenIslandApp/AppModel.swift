@@ -2,11 +2,13 @@ import AppKit
 import Foundation
 import Observation
 import OpenIslandCore
+import OSLog
 import SwiftUI
 
 @MainActor
 @Observable
 final class AppModel {
+    private static let logger = Logger(subsystem: "app.openisland", category: "AppModel")
     private static let soundMutedDefaultsKey = "overlay.sound.muted"
     private static let showDockIconDefaultsKey = "app.showDockIcon"
     private static let hapticFeedbackEnabledDefaultsKey = "app.hapticFeedbackEnabled"
@@ -277,6 +279,8 @@ final class AppModel {
             guard autoResponseRules != oldValue else { return }
             if let data = try? JSONEncoder().encode(autoResponseRules) {
                 UserDefaults.standard.set(data, forKey: Self.autoResponseRulesDefaultsKey)
+            } else {
+                Self.logger.error("Failed to encode autoResponseRules for persistence")
             }
             bridgeServer.autoResponseRules = autoResponseRules
         }
@@ -1085,7 +1089,13 @@ final class AppModel {
                 for try await event in stream {
                     self.applyTrackedEvent(event)
                 }
-            } catch {}
+            } catch {
+                Self.logger.error("Bridge event stream terminated: \(error.localizedDescription)")
+                harnessRuntimeMonitor?.recordMilestone(
+                    "bridgeStreamError",
+                    message: "Bridge event stream error: \(error.localizedDescription)"
+                )
+            }
 
             // Stream ended (server closed our connection or transient error).
             // Mark as disconnected and schedule reconnection.

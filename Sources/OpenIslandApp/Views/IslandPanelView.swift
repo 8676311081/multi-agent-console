@@ -638,6 +638,9 @@ struct IslandPanelView: View {
     private static let maxSessionListHeight: CGFloat = 560
 
     private var sessionList: some View {
+        // OPTIMIZE: TimelineView re-renders the entire session list every 30s.
+        // Could replace with a shared timer publisher (Timer.publish) and
+        // @State Date to avoid re-evaluating all IslandSessionRow bodies.
         TimelineView(.periodic(from: .now, by: 30)) { context in
             if isNotificationMode {
                 // Notification mode: NO ScrollView — content sizes naturally
@@ -1303,6 +1306,10 @@ private struct IslandSessionRow: View {
                                             .font(.system(size: 10, weight: .medium))
                                             .foregroundStyle(.white.opacity(0.4))
                                     } else if let started = sub.startedAt {
+                                        // OPTIMIZE: TimelineView fires every 1s per subagent.
+                                        // With many active subagents this means dozens of per-second
+                                        // re-renders. Could consolidate into a single Timer.publish
+                                        // that each elapsed-time view subscribes to.
                                         TimelineView(.periodic(from: .now, by: 1)) { timeline in
                                             Text(subagentElapsed(since: started, at: timeline.date))
                                                 .font(.system(size: 10, weight: .medium))

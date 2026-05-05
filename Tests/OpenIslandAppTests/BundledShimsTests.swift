@@ -35,12 +35,12 @@ struct BundledShimsTests {
 
     @Test
     func bundleShipsAllExpectedShims() throws {
-        // Three shims must be in the bundle so the install loop in
+        // Four shims must be in the bundle so the install loop in
         // `ensureShimsInstalled` finds them. Adding a new shim later
         // means extending the source-of-truth list in
         // HookInstallationCoordinator.bundledShimNames AND adding a
         // per-content test below.
-        let expected = ["claude-native", "oi-claude", "claude-3"]
+        let expected = ["claude-native", "oi-claude", "claude-3", "claude-deep"]
         for name in expected {
             let content = try Self.shimContent(name)
             #expect(content.hasPrefix("#!/bin/zsh"), "\(name) should be a zsh shim")
@@ -119,5 +119,50 @@ struct BundledShimsTests {
         #expect(content.contains("ANTHROPIC_BASE_URL=\"http://127.0.0.1:${OPEN_ISLAND_PORT}\""))
         // Must NOT carry the sentinel prefix — that's claude-3's job.
         #expect(!content.contains("/_oi/profile"))
+        #expect(!content.contains("/_oi/family"))
+    }
+
+    @Test
+    func claudeDeepShimEmitsFamilySentinelWhenOIProfileUnset() throws {
+        // claude-deep's default branch must emit the
+        // `/_oi/family/deepseek` URL prefix that the proxy's
+        // `parseFamilySentinel(path:)` recognizes. Anything else
+        // would silently degrade to oi-claude / claude-3 behavior
+        // (no family enforcement) and defeat the whole point of
+        // having a separate `claude-deep` command.
+        let content = try Self.shimContent("claude-deep")
+        #expect(content.contains("/_oi/family/deepseek"),
+                "claude-deep must encode the deepseek family constraint into a /_oi/family/deepseek URL prefix")
+        // Verify the OI_PROFILE check guards the family branch — the
+        // shim should fall into the family branch when OI_PROFILE is
+        // unset, and into the per-id override branch when it is set.
+        #expect(
+            content.contains("\"${OI_PROFILE:-}\"") || content.contains("\"$OI_PROFILE\""),
+            "claude-deep must check OI_PROFILE before deciding which sentinel to emit"
+        )
+    }
+
+    @Test
+    func claudeDeepShimHonorsOIProfileOverride() throws {
+        // claude-deep keeps the same `OI_PROFILE` escape hatch as
+        // claude-3 — when set, it wins over the family constraint.
+        // This is the documented advanced-user override (option B in
+        // the design doc): named command picks the family by default,
+        // env var lets a single invocation cross the line.
+        let content = try Self.shimContent("claude-deep")
+        #expect(content.contains("/_oi/profile/${OI_PROFILE}"),
+                "claude-deep must encode OI_PROFILE into a /_oi/profile/<id> URL prefix when set")
+    }
+
+    @Test
+    func claudeDeepShimUsesProxyAndExecsClaude() throws {
+        // Smoke that the shim reaches `exec env ANTHROPIC_BASE_URL=…
+        // claude "$@"` shape used by the other proxy shims. Catches
+        // refactors that accidentally invoke a different binary or
+        // forget to thread args.
+        let content = try Self.shimContent("claude-deep")
+        #expect(content.contains("127.0.0.1:${OPEN_ISLAND_PORT}"))
+        #expect(content.contains("exec env ANTHROPIC_BASE_URL="))
+        #expect(content.contains("claude \"$@\""))
     }
 }

@@ -376,7 +376,7 @@ struct AboutSettingsPane: View {
                         systemImage: "arrow.triangle.2.circlepath",
                         tint: primaryInk,
                         action: {
-                            NSWorkspace.shared.open(UpdateChecker.releasesURL)
+                            model.updateChecker.checkForUpdates()
                         }
                     )
                     .accessibilityIdentifier("settings.about.checkForUpdates")

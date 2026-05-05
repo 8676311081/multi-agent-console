@@ -227,6 +227,21 @@ public final class WatchHTTPEndpoint: @unchecked Sendable {
 
     private func startListener() {
         do {
+            // SECURITY NOTE (C-3): The watch/iPhone pairing endpoint currently
+            // uses plain TCP over WiFi without TLS. The pairing code and
+            // resulting Bearer token travel in cleartext. Both are time-limited
+            // (2 min pairing code, 1 hr token) and rate-limited (3 failures →
+            // code rotation, 10 failures → 5 min IP block), but an attacker on
+            // the same WiFi network could capture the code via passive sniffing.
+            //
+            // Recommended mitigation (requires design review):
+            //   - Use NWParameters(tls: NWProtocolTLS.Options()) with a
+            //     self-signed certificate
+            //   - Pin the certificate fingerprint in the Bonjour TXT record
+            //   - Alternatively: use out-of-band pairing (QR code + DeviceCheck)
+            //
+            // The current approach is acceptable for trusted-home-network use
+            // but not for public WiFi or enterprise deployments.
             let params = NWParameters.tcp
             params.requiredInterfaceType = .wifi
             let listener = try NWListener(using: params)
