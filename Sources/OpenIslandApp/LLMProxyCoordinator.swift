@@ -102,7 +102,18 @@ final class LLMProxyCoordinator {
         return url
     }
 
-    private static func isPrivateOrLoopback(host: String) -> Bool {
+    /// Internal-visible helper exposed for retroactive scanning of
+    /// already-persisted custom profiles (C-1 backfill). Same logic
+    /// `validatedUpstream` runs on new entries; lifted to a static
+    /// so `UpstreamProfileStore.scanCustomProfiles` can use it
+    /// without taking a dependency on the App layer.
+    /// `nonisolated` so it can be passed as a `@Sendable` closure
+    /// from non-MainActor call sites (the store's scanner).
+    nonisolated static func isPublicHost(_ host: String) -> Bool {
+        !isPrivateOrLoopback(host: host)
+    }
+
+    nonisolated private static func isPrivateOrLoopback(host: String) -> Bool {
         let lower = host.lowercased()
         if lower == "localhost" || lower == "127.0.0.1" || lower == "::1" {
             return true
@@ -124,8 +135,37 @@ final class LLMProxyCoordinator {
         return false
     }
 
+    /// C-1 backfill: scan persisted custom profiles against today's
+    /// SSRF policy and downgrade `active` if it points at a now-
+    /// disallowed host. Profiles that fail are NOT deleted — left
+    /// in the store so the user can edit / review them via the
+    /// routing pane. Idempotent; safe to call on every app launch.
+    /// Logs at warning level for any scrub action.
+    @discardableResult
+    func backfillSSRFPolicy() -> UpstreamProfileStore.CustomProfileScan {
+        let scan = profileStore.scanCustomProfiles(isHostAllowed: Self.isPublicHost)
+        if !scan.disallowed.isEmpty {
+            Self.logger.warning(
+                "SSRF backfill: \(scan.disallowed.count, privacy: .public) custom profile(s) have non-public hosts and cannot be activated: \(scan.disallowed.joined(separator: ", "), privacy: .public)"
+            )
+            let downgraded = profileStore.resetActiveIfInDisallowedList(Set(scan.disallowed))
+            if let prev = downgraded {
+                Self.logger.error(
+                    "SSRF backfill: active profile \"\(prev, privacy: .public)\" pointed at a private/loopback host — reset to default (\(UpstreamProfileStore.defaultActiveProfileId, privacy: .public))."
+                )
+            }
+        }
+        return scan
+    }
+
     func start() {
         guard !isRunning else { return }
+        // C-1 backfill: vet persisted custom profiles BEFORE the
+        // proxy starts accepting traffic. If the active profile
+        // points at a private/loopback host, downgrade to default
+        // here so the very first request after start uses a safe
+        // upstream.
+        backfillSSRFPolicy()
         server.setObserver(usageObserver)
         do {
             try server.start()

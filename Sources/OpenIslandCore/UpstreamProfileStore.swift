@@ -258,6 +258,63 @@ public final class UpstreamProfileStore: UpstreamProfileResolver, @unchecked Sen
         }
     }
 
+    // MARK: - Retroactive validation (C-1 backfill)
+
+    /// Result of scanning persisted custom profiles against an
+    /// up-to-date SSRF host policy. The check is delegated via a
+    /// closure so policy logic lives in the App layer
+    /// (`LLMProxyCoordinator.isPrivateOrLoopback` etc.) and the
+    /// store stays UI-policy-free.
+    public struct CustomProfileScan: Equatable, Sendable {
+        /// Profile IDs whose `baseURL.host` passes `isHostAllowed`.
+        public var allowed: [String]
+        /// Profile IDs that fail today's policy. Persisted on disk
+        /// from before the policy existed (e.g. created when SSRF
+        /// validation only ran on new entries). UI/coordinator
+        /// should refuse to route through these and may surface
+        /// them as "needs review".
+        public var disallowed: [String]
+    }
+
+    /// Walk all persisted custom profiles and partition them by
+    /// whether their `baseURL.host` satisfies `isHostAllowed`.
+    /// Pure read; takes the lock for one snapshot.
+    public func scanCustomProfiles(
+        isHostAllowed: @Sendable (String) -> Bool
+    ) -> CustomProfileScan {
+        lock.withLock {
+            let custom = readCustomProfilesLocked()
+            var allowed: [String] = []
+            var disallowed: [String] = []
+            for profile in custom {
+                let host = profile.baseURL.host?.lowercased() ?? ""
+                if !host.isEmpty, isHostAllowed(host) {
+                    allowed.append(profile.id)
+                } else {
+                    disallowed.append(profile.id)
+                }
+            }
+            return CustomProfileScan(allowed: allowed, disallowed: disallowed)
+        }
+    }
+
+    /// If the currently-active profile id is in `disallowedIDs`,
+    /// reset active to the default. No-op if active is already
+    /// safe. Returns the previously-active id when a downgrade
+    /// happened — caller can use it to surface UX (banner, alert).
+    @discardableResult
+    public func resetActiveIfInDisallowedList(
+        _ disallowedIDs: Set<String>
+    ) -> String? {
+        lock.withLock {
+            let activeId = userDefaults.string(forKey: Self.activeProfileIdDefaultsKey)
+                ?? Self.defaultActiveProfileId
+            guard disallowedIDs.contains(activeId) else { return nil }
+            userDefaults.set(Self.defaultActiveProfileId, forKey: Self.activeProfileIdDefaultsKey)
+            return activeId
+        }
+    }
+
     // MARK: - Active profile (write)
 
     /// Switch the active profile. Throws if `id` doesn't correspond
