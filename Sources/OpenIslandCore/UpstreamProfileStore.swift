@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Provenance for a resolved profile: did it come from the user's GUI
 /// selection (the active card), or from a per-request override
@@ -25,13 +26,16 @@ public struct ResolvedProfile: Sendable, Equatable {
     }
 }
 
-/// Errors the resolver may raise. Today only `unknownOverride` —
-/// surfaced as a 400 by the proxy in T3 when the URL sentinel
-/// references an id not in the registry. Stored here (not at the call
-/// site) so the proxy code stays clean and the error type is
-/// importable from tests.
+/// Errors the resolver may raise. `unknownOverride` is the T3/T4 case
+/// (URL sentinel referenced an id not in the registry). `familyMismatch`
+/// is the `claude-deep` case (the GUI-active profile's id does not
+/// start with `<family>-` so it cannot satisfy the shim's family
+/// constraint). Both are surfaced as 400s by the proxy with structured
+/// JSON bodies. Stored here (not at the call site) so the proxy code
+/// stays clean and the error types are importable from tests.
 public enum UpstreamProfileResolverError: Error, Equatable {
     case unknownOverride(id: String)
+    case familyMismatch(requiredFamily: String, activeId: String)
 }
 
 /// Read-only side of the routing table — used by the proxy hot path
@@ -59,6 +63,14 @@ public protocol UpstreamProfileResolver: Sendable {
     /// not registered, throws `.unknownOverride(id:)` so the proxy
     /// can return a 400 instead of silently falling back to active.
     func resolveProfile(overrideId: String?) throws -> ResolvedProfile
+    /// Family-constrained resolution invoked when the proxy sees the
+    /// `/_oi/family/<family>` URL sentinel emitted by `claude-deep`.
+    /// Returns the GUI-active profile as `.activeDefault` IFF its id
+    /// has prefix `"<family>-"`. Otherwise throws `.familyMismatch`
+    /// so the proxy can return a 400 explaining what to do (either
+    /// switch the GUI-active card or fall back to `claude-3` which
+    /// has no family constraint).
+    func resolveProfile(requiringFamily family: String) throws -> ResolvedProfile
     /// Stable, sorted list of all profile ids known to this resolver.
     /// Used in T4's 400 body for the `available` field so users
     /// hitting a typo get a concrete list of valid alternatives. The
@@ -90,6 +102,22 @@ public extension UpstreamProfileResolver {
         )
     }
 
+    func resolveProfile(requiringFamily family: String) throws -> ResolvedProfile {
+        // Family is matched as a `<family>-` id prefix. We deliberately
+        // require the trailing hyphen so a profile literally named
+        // `deepseek` (no variant) does NOT satisfy `family=deepseek`,
+        // and `deepseekers-pro` does not either — the convention is
+        // strictly `<family>-<variant>`.
+        let active = currentActiveProfile()
+        if active.id.hasPrefix(family + "-") {
+            return ResolvedProfile(profile: active, source: .activeDefault)
+        }
+        throw UpstreamProfileResolverError.familyMismatch(
+            requiredFamily: family,
+            activeId: active.id
+        )
+    }
+
     func availableProfileIds() -> [String] {
         // Test-fake fallback. Concrete stores override with the full
         // builtins-plus-custom registry.
@@ -117,6 +145,11 @@ public extension UpstreamProfileResolver {
 /// / switch). NSLock contention is negligible. Sync read path
 /// keeps the proxy fast.
 ///
+/// **Read-write consistency:** All reads and writes are protected
+/// by an `os_unfair_lock`. Profile resolution happens once at
+/// request entry via `ResolvedProfile`, so a mid-flight active-flip
+/// cannot tear an in-progress request.
+///
 /// If a future Swift evolution adds a sync-callable actor variant
 /// (sometimes discussed as "isolated subclass" or "actor accessors"
 /// — none accepted at time of writing), revisit. Until then:
@@ -128,25 +161,42 @@ public final class UpstreamProfileStore: UpstreamProfileResolver, @unchecked Sen
     public static let defaultActiveProfileId = "anthropic-native"
 
     private let userDefaults: UserDefaults
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock()
 
     public init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
     }
 
     // MARK: - Read
+    //
+    // All public read methods take `lock` for the duration of one
+    // atomic snapshot read. `OSAllocatedUnfairLock` is NOT
+    // recursive — calling another locked method while holding the
+    // lock will deadlock. So every public method that needs
+    // multiple internal reads under one lock uses the `*Locked`
+    // helpers below, which assume the caller already holds `lock`.
 
     /// All profiles known to the store: builtins first, then custom
     /// in insertion order. Builtins live in `BuiltinProfiles.all`;
     /// custom come from JSON-decoded `UserDefaults`.
     public var allProfiles: [UpstreamProfile] {
-        BuiltinProfiles.all + readCustomProfiles()
+        lock.withLock { allProfilesLocked }
+    }
+
+    /// Lock-free accessor; caller MUST hold `lock`.
+    private var allProfilesLocked: [UpstreamProfile] {
+        BuiltinProfiles.all + readCustomProfilesLocked()
     }
 
     public func currentActiveProfile() -> UpstreamProfile {
+        lock.withLock { currentActiveProfileLocked() }
+    }
+
+    /// Lock-free accessor; caller MUST hold `lock`.
+    private func currentActiveProfileLocked() -> UpstreamProfile {
         let activeId = userDefaults.string(forKey: Self.activeProfileIdDefaultsKey)
             ?? Self.defaultActiveProfileId
-        return allProfiles.first { $0.id == activeId } ?? BuiltinProfiles.anthropicNative
+        return allProfilesLocked.first { $0.id == activeId } ?? BuiltinProfiles.anthropicNative
     }
 
     /// Concrete override: walk the full registry (builtins + custom).
@@ -156,7 +206,7 @@ public final class UpstreamProfileStore: UpstreamProfileResolver, @unchecked Sen
     /// proxy / observer need when resolving an override id that does
     /// not happen to be the active one.
     public func profile(id: String) -> UpstreamProfile? {
-        allProfiles.first { $0.id == id }
+        lock.withLock { allProfilesLocked.first { $0.id == id } }
     }
 
     /// Concrete override: returns the full sorted list of registered
@@ -165,44 +215,47 @@ public final class UpstreamProfileStore: UpstreamProfileResolver, @unchecked Sen
     /// the JSON output is stable across builds (helps test fixtures
     /// and human grep).
     public func availableProfileIds() -> [String] {
-        allProfiles.map(\.id).sorted()
+        lock.withLock { allProfilesLocked.map(\.id).sorted() }
     }
 
     public func profileMatching(url: URL) -> UpstreamProfile? {
         guard let host = url.host?.lowercased() else { return nil }
         let reqPath = url.path
-        // Filter to host-matching profiles, then keep ones whose
-        // baseURL path is a prefix of the request path. Sort by
-        // path length descending so longest-match wins — guards
-        // against two custom profiles sharing a host but with
-        // different sub-paths (e.g. /openai vs /openai/proxy).
-        let candidates = allProfiles.filter { profile in
-            guard profile.baseURL.host?.lowercased() == host else { return false }
-            let profPath = profile.baseURL.path
-            if profPath.isEmpty {
-                // Empty profile path matches any path on the host
-                // (Anthropic native: baseURL = https://api.anthropic.com).
-                return true
+        return lock.withLock {
+            // Filter to host-matching profiles, then keep ones whose
+            // baseURL path is a prefix of the request path. Sort by
+            // path length descending so longest-match wins — guards
+            // against two custom profiles sharing a host but with
+            // different sub-paths (e.g. /openai vs /openai/proxy).
+            let all = allProfilesLocked
+            let candidates = all.filter { profile in
+                guard profile.baseURL.host?.lowercased() == host else { return false }
+                let profPath = profile.baseURL.path
+                if profPath.isEmpty {
+                    // Empty profile path matches any path on the host
+                    // (Anthropic native: baseURL = https://api.anthropic.com).
+                    return true
+                }
+                if reqPath == profPath { return true }
+                return reqPath.hasPrefix(profPath + "/")
             }
-            if reqPath == profPath { return true }
-            return reqPath.hasPrefix(profPath + "/")
+            let sorted = candidates.sorted { $0.baseURL.path.count > $1.baseURL.path.count }
+            guard let first = sorted.first else { return nil }
+            let active = currentActiveProfileLocked()
+            // When several profiles share the exact same base URL
+            // (common for custom Pro/Flash profiles on the same gateway),
+            // prefer the active profile for credential lookup. Keep this
+            // constrained to the best path-prefix group; otherwise an
+            // active empty-path profile such as Anthropic Native would
+            // incorrectly beat a more specific profile path.
+            let bestPath = first.baseURL.path
+            if active.baseURL.host?.lowercased() == host,
+               active.baseURL.path == bestPath,
+               sorted.contains(where: { $0.id == active.id }) {
+                return active
+            }
+            return first
         }
-        let sorted = candidates.sorted { $0.baseURL.path.count > $1.baseURL.path.count }
-        guard let first = sorted.first else { return nil }
-        let active = currentActiveProfile()
-        // When several profiles share the exact same base URL
-        // (common for custom Pro/Flash profiles on the same gateway),
-        // prefer the active profile for credential lookup. Keep this
-        // constrained to the best path-prefix group; otherwise an
-        // active empty-path profile such as Anthropic Native would
-        // incorrectly beat a more specific profile path.
-        let bestPath = first.baseURL.path
-        if active.baseURL.host?.lowercased() == host,
-           active.baseURL.path == bestPath,
-           sorted.contains(where: { $0.id == active.id }) {
-            return active
-        }
-        return first
     }
 
     // MARK: - Active profile (write)
@@ -211,11 +264,12 @@ public final class UpstreamProfileStore: UpstreamProfileResolver, @unchecked Sen
     /// to any built-in or custom profile (defensive: avoids leaving
     /// the store in a state where the active id dangles).
     public func setActiveProfile(_ id: String) throws {
-        lock.lock(); defer { lock.unlock() }
-        guard allProfiles.contains(where: { $0.id == id }) else {
-            throw UpstreamProfileError.unknownProfile(id: id)
+        try lock.withLock {
+            guard allProfilesLocked.contains(where: { $0.id == id }) else {
+                throw UpstreamProfileError.unknownProfile(id: id)
+            }
+            userDefaults.set(id, forKey: Self.activeProfileIdDefaultsKey)
         }
-        userDefaults.set(id, forKey: Self.activeProfileIdDefaultsKey)
     }
 
     // MARK: - Custom profiles (write)
@@ -224,54 +278,70 @@ public final class UpstreamProfileStore: UpstreamProfileResolver, @unchecked Sen
     /// Re-adding a profile with the same id replaces the existing
     /// one (same UX as updating a row).
     public func addCustomProfile(_ profile: UpstreamProfile) throws {
-        lock.lock(); defer { lock.unlock() }
-        guard profile.isCustom else {
-            throw UpstreamProfileError.cannotAddBuiltinAsCustom
+        try lock.withLock {
+            guard profile.isCustom else {
+                throw UpstreamProfileError.cannotAddBuiltinAsCustom
+            }
+            guard !BuiltinProfiles.all.contains(where: { $0.id == profile.id }) else {
+                throw UpstreamProfileError.idCollidesWithBuiltin(id: profile.id)
+            }
+            var custom = readCustomProfilesLocked()
+            if let idx = custom.firstIndex(where: { $0.id == profile.id }) {
+                custom[idx] = profile
+            } else {
+                custom.append(profile)
+            }
+            try writeCustomProfilesLocked(custom)
         }
-        guard !BuiltinProfiles.all.contains(where: { $0.id == profile.id }) else {
-            throw UpstreamProfileError.idCollidesWithBuiltin(id: profile.id)
-        }
-        var custom = readCustomProfiles()
-        if let idx = custom.firstIndex(where: { $0.id == profile.id }) {
-            custom[idx] = profile
-        } else {
-            custom.append(profile)
-        }
-        try writeCustomProfiles(custom)
     }
 
     /// Remove a custom profile. Built-ins cannot be removed (throws
     /// `cannotRemoveBuiltin`). If the removed profile was the active
     /// one, active falls back to `defaultActiveProfileId`.
     public func removeCustomProfile(id: String) throws {
-        lock.lock(); defer { lock.unlock() }
-        if BuiltinProfiles.all.contains(where: { $0.id == id }) {
-            throw UpstreamProfileError.cannotRemoveBuiltin(id: id)
-        }
-        var custom = readCustomProfiles()
-        custom.removeAll { $0.id == id }
-        try writeCustomProfiles(custom)
-        // If the active profile was removed, fall back to default
-        // so future requests don't hit "no profile matches" silently.
-        let activeId = userDefaults.string(forKey: Self.activeProfileIdDefaultsKey)
-        if activeId == id {
-            userDefaults.set(Self.defaultActiveProfileId, forKey: Self.activeProfileIdDefaultsKey)
+        try lock.withLock {
+            if BuiltinProfiles.all.contains(where: { $0.id == id }) {
+                throw UpstreamProfileError.cannotRemoveBuiltin(id: id)
+            }
+            var custom = readCustomProfilesLocked()
+            custom.removeAll { $0.id == id }
+            try writeCustomProfilesLocked(custom)
+            // If the active profile was removed, fall back to default
+            // so future requests don't hit "no profile matches" silently.
+            let activeId = userDefaults.string(forKey: Self.activeProfileIdDefaultsKey)
+            if activeId == id {
+                userDefaults.set(Self.defaultActiveProfileId, forKey: Self.activeProfileIdDefaultsKey)
+            }
         }
     }
 
     // MARK: - Persistence
+    //
+    // These helpers are `*Locked` to make the contract explicit:
+    // the caller is responsible for holding `lock`. UserDefaults is
+    // itself thread-safe, but holding the store's lock during a
+    // read+decode+write cycle is what gives the public API its
+    // atomic-snapshot guarantee.
 
-    private func readCustomProfiles() -> [UpstreamProfile] {
+    /// Read custom profiles from `UserDefaults` and decode. Caller
+    /// MUST hold `lock`.
+    private func readCustomProfilesLocked() -> [UpstreamProfile] {
         guard let data = userDefaults.data(forKey: Self.customProfilesDefaultsKey) else {
             return []
         }
         // Corrupt JSON => empty list rather than crash. Worst case
         // user re-enters their custom profiles; better than the app
-        // refusing to start.
-        return (try? JSONDecoder().decode([UpstreamProfile].self, from: data)) ?? []
+        // refusing to start. Log the decode failure for diagnostics.
+        do {
+            return try JSONDecoder().decode([UpstreamProfile].self, from: data)
+        } catch {
+            os_log(.error, "Failed to decode custom profiles JSON: %{public}@", error.localizedDescription)
+            return []
+        }
     }
 
-    private func writeCustomProfiles(_ profiles: [UpstreamProfile]) throws {
+    /// Encode and persist custom profiles. Caller MUST hold `lock`.
+    private func writeCustomProfilesLocked(_ profiles: [UpstreamProfile]) throws {
         let data = try JSONEncoder().encode(profiles)
         userDefaults.set(data, forKey: Self.customProfilesDefaultsKey)
     }
