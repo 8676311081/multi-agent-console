@@ -211,6 +211,15 @@ public final class LLMProxyServer: @unchecked Sendable {
             }
             listener = try NWListener(using: params, on: port)
         }
+        // Cap concurrent connections so a misbehaving (or malicious)
+        // local process can't exhaust per-process file descriptors
+        // by opening N sockets to 9710. 64 sits well above realistic
+        // Claude Code concurrency (1-4 simultaneous streams) and
+        // well below macOS's default per-process FD ceiling
+        // (256–10240). NWListener silently drops connections beyond
+        // the limit; legitimate clients see a transient connect
+        // failure and retry.
+        listener.newConnectionLimit = 64
         listener.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
@@ -218,8 +227,30 @@ public final class LLMProxyServer: @unchecked Sendable {
                 Self.logger.info("LLM proxy ready on 127.0.0.1:\(self.configuration.port)")
                 LLMProxyPIDFile.write()
             case let .failed(error):
-                Self.logger.error("LLM proxy listener failed: \(error.localizedDescription)")
+                // SELF-HEAL: when the kernel poisons the listener
+                // (resource exhaustion, kernel TCP error, etc.) the
+                // socket fd stays open — `lsof` still shows LISTEN
+                // — but accept() never fires again. Without this
+                // recovery branch the proxy dies silently after
+                // long uptime: clients get HTTP timeouts forever
+                // until a manual restart. Cancel the dead listener
+                // and re-bind on the same queue. Recursive `start()`
+                // is bounded by the kernel's ability to bind the
+                // port; if rebind itself fails we'll log and stop
+                // (won't loop on an unbindable port).
+                Self.logger.error("LLM proxy listener failed: \(error.localizedDescription) — attempting self-heal restart")
                 LLMProxyPIDFile.clear()
+                self.queue.async { [weak self] in
+                    guard let self else { return }
+                    self.listener?.cancel()
+                    self.listener = nil
+                    do {
+                        try self.start()
+                        Self.logger.info("LLM proxy listener self-heal succeeded")
+                    } catch {
+                        Self.logger.error("LLM proxy listener self-heal FAILED — proxy is now dead until app restart: \(error.localizedDescription)")
+                    }
+                }
             case .cancelled:
                 Self.logger.info("LLM proxy listener cancelled")
                 LLMProxyPIDFile.clear()
@@ -250,6 +281,15 @@ public final class LLMProxyServer: @unchecked Sendable {
             switch connState {
             case let .failed(error):
                 Self.logger.debug("connection failed: \(error.localizedDescription)")
+                self?.queue.async { connection.cancel() }
+            case let .waiting(error):
+                // NWConnection enters .waiting when the kernel can't
+                // proceed (resource starvation, TCP backoff, system
+                // proxy interference). On loopback this should be
+                // brief or non-existent; treating it as a failure
+                // prevents stale .waiting connections from sitting
+                // forever and chewing through `newConnectionLimit`.
+                Self.logger.debug("connection waiting: \(error.localizedDescription) — cancelling to free slot")
                 self?.queue.async { connection.cancel() }
             case .cancelled:
                 break
@@ -383,14 +423,16 @@ public final class LLMProxyServer: @unchecked Sendable {
         head: LLMProxyHTTP.RequestHead,
         body: Data
     ) {
-        // T3 — parse the URL-sentinel for per-invocation profile
-        // override BEFORE any path-based decisions. The sentinel
-        // pattern is `/_oi/profile/<id>/...`; absence yields
-        // (overrideId: nil, requestPath: head.path). Everything
-        // downstream from here uses `requestPath`, never head.path,
-        // so upstream never sees the sentinel and routing decisions
-        // are made against the user's intended endpoint.
-        let (overrideId, requestPath) = Self.parseSentinel(path: head.path)
+        // Parse URL sentinels BEFORE any path-based decisions. Two
+        // mutually exclusive sentinels:
+        //   /_oi/profile/<id>/...   — claude-3's OI_PROFILE override
+        //   /_oi/family/<family>/...— claude-deep's family constraint
+        // Run both parsers in series; at most one matches because the
+        // shim emits one or the other. Everything downstream uses the
+        // cleaned `requestPath`, never head.path, so upstream never
+        // sees the sentinel.
+        let (requiredFamily, pathAfterFamily) = Self.parseFamilySentinel(path: head.path)
+        let (overrideId, requestPath) = Self.parseSentinel(path: pathAfterFamily)
 
         if requestPath == "/healthz" || requestPath == "/healthz/" {
             respondLocally(
@@ -402,20 +444,27 @@ public final class LLMProxyServer: @unchecked Sendable {
             return
         }
 
-        // Resolve the profile once at request entry. With
-        // `overrideId == nil` this returns the GUI active default;
-        // with a non-nil id it returns the override profile and
-        // throws `.unknownOverride` if the id is not registered.
-        // T4: explicit catch on `unknownOverride` → 400 with a
-        // structured JSON body listing available ids so the user
-        // sees the typo at the proxy edge instead of a confusing
-        // 401 from upstream. Other thrown errors are unexpected
-        // (the protocol only declares `unknownOverride` today) but
-        // we degrade to a 500 rather than crash the connection.
+        // Resolve the profile once at request entry. Three branches:
+        //  - overrideId set     → existing T3/T4 path (profile id wins
+        //                          even if a family constraint was also
+        //                          parsed; defensive — shim never emits
+        //                          both, but this keeps the precedence
+        //                          explicit).
+        //  - requiredFamily set → claude-deep path: GUI-active profile
+        //                          must satisfy `id.hasPrefix("<family>-")`.
+        //  - neither            → plain GUI-active default.
+        // Errors map to structured 400s so users see the actionable
+        // hint at the proxy edge instead of a confusing upstream 401.
         let resolved: ResolvedProfile?
         if let resolver = profileResolver {
             do {
-                resolved = try resolver.resolveProfile(overrideId: overrideId)
+                if let overrideId {
+                    resolved = try resolver.resolveProfile(overrideId: overrideId)
+                } else if let requiredFamily {
+                    resolved = try resolver.resolveProfile(requiringFamily: requiredFamily)
+                } else {
+                    resolved = try resolver.resolveProfile(overrideId: nil)
+                }
             } catch UpstreamProfileResolverError.unknownOverride(let id) {
                 respondLocally(
                     state: state,
@@ -423,6 +472,19 @@ public final class LLMProxyServer: @unchecked Sendable {
                     body: Self.makeUnknownOverrideBody(
                         id: id,
                         available: resolver.availableProfileIds()
+                    )
+                )
+                return
+            } catch UpstreamProfileResolverError.familyMismatch(let family, let activeId) {
+                let matching = resolver.availableProfileIds()
+                    .filter { $0.hasPrefix(family + "-") }
+                respondLocally(
+                    state: state,
+                    status: 400,
+                    body: Self.makeFamilyMismatchBody(
+                        requiredFamily: family,
+                        activeId: activeId,
+                        matchingAvailable: matching
                     )
                 )
                 return
@@ -637,6 +699,38 @@ public final class LLMProxyServer: @unchecked Sendable {
         return s
     }
 
+    /// 400 body returned when `claude-deep`'s family sentinel
+    /// references a family that the GUI-active profile does not
+    /// belong to (e.g. `/_oi/family/deepseek` while active is
+    /// `anthropic-native`). Mirrors the unknown-override body shape
+    /// — same `error.type` namespace prefix so log scrapers can grep
+    /// for `open_island_*`. `matching_available` lists the registered
+    /// profile ids that DO satisfy the constraint, so the user can
+    /// pick one to switch to in the routing pane.
+    static func makeFamilyMismatchBody(
+        requiredFamily: String,
+        activeId: String,
+        matchingAvailable: [String]
+    ) -> String {
+        let payload: [String: Any] = [
+            "type": "error",
+            "error": [
+                "type": "open_island_family_mismatch",
+                "required_family": requiredFamily,
+                "active_profile_id": activeId,
+                "matching_available": matchingAvailable,
+                "message": "claude-deep requires the `\(requiredFamily)` family to be GUI-active (any profile whose id starts with `\(requiredFamily)-`), but the active profile is `\(activeId)`. Pick a matching profile in the routing pane, or use `claude-3` which has no family constraint."
+            ] as [String: Any]
+        ]
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: payload),
+            let s = String(data: data, encoding: .utf8)
+        else {
+            return #"{"type":"error","error":{"type":"open_island_family_mismatch"}}"#
+        }
+        return s
+    }
+
     // MARK: - Forwarding
 
     private func forward(
@@ -726,17 +820,48 @@ public final class LLMProxyServer: @unchecked Sendable {
     }
 
     /// Concatenate the upstream base URL with the inbound request-target.
-    /// Both `https://api.openai.com` + `/v1/responses` and
-    /// `https://api2.tabcode.cc/openai/plus` + `/v1/responses` need to
-    /// produce sensible URLs. We trim a trailing slash off the base,
-    /// ensure the request target starts with one, and concat as
-    /// strings — the request-target already includes any query string
-    /// verbatim from the wire, so URLComponents would just complicate.
+    /// Rejects request-target segments containing ".." to prevent path
+    /// traversal, and normalizes via URLComponents for safety against
+    /// fragment/query injection through the base URL string.
     static func combineUpstream(base: URL, requestTarget: String) -> URL? {
-        var baseString = base.absoluteString
-        if baseString.hasSuffix("/") { baseString.removeLast() }
-        let suffix = requestTarget.hasPrefix("/") ? requestTarget : "/" + requestTarget
-        return URL(string: baseString + suffix)
+        // Split inbound request target into path + query. Without this
+        // split, a request-target like `/v1/messages?beta=true` is set
+        // wholesale onto `comps.path`, where the `?` gets URL-encoded
+        // to `%3F` and the upstream sees the literal path
+        // `/v1/messages%3Fbeta=true` — an invalid URL that gateways
+        // reject with 404. Claude Code 2.1.123+ sends `?beta=true`
+        // for streaming/beta features against api.anthropic.com; the
+        // proxy must preserve the query when forwarding.
+        let rawPath: String
+        let rawQuery: String?
+        if let qIdx = requestTarget.firstIndex(of: "?") {
+            rawPath = String(requestTarget[..<qIdx])
+            rawQuery = String(requestTarget[requestTarget.index(after: qIdx)...])
+        } else {
+            rawPath = requestTarget
+            rawQuery = nil
+        }
+        // Reject path traversal attempts before concatenation.
+        let segments = rawPath.split(separator: "/", omittingEmptySubsequences: false)
+        if segments.contains("..") { return nil }
+        guard var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        let suffix = rawPath.hasPrefix("/") ? rawPath : "/" + rawPath
+        // Append the suffix to the existing path, normalizing "//" etc.
+        var path = comps.path
+        while path.hasSuffix("/") { path.removeLast() }
+        comps.path = path + suffix
+        // Reject URLs with fragments introduced by the base. Query is
+        // now allowed: it comes from the inbound request and is set
+        // explicitly below, overriding any base.query.
+        guard comps.fragment == nil else {
+            return nil
+        }
+        if let rawQuery, !rawQuery.isEmpty {
+            comps.percentEncodedQuery = rawQuery
+        }
+        return comps.url
     }
 
     /// Per-invocation override sentinel: when the `claude-3` shim
@@ -774,6 +899,36 @@ public final class LLMProxyServer: @unchecked Sendable {
             return (nil, path)
         }
         return (id, "/")
+    }
+
+    /// Family-constraint sentinel: when the `claude-deep` shim sets
+    /// `ANTHROPIC_BASE_URL=http://127.0.0.1:9710/_oi/family/<family>`,
+    /// the inbound request-target arrives as `/_oi/family/<family>/v1/messages`.
+    /// Returns the constrained family and the cleaned request-path.
+    /// Same shape and same empty-segment fallback policy as
+    /// `parseSentinel(path:)` — the two prefixes are mutually
+    /// exclusive at the URL level (a single shim emits one or the
+    /// other), so callers can run both parsers in series and trust
+    /// that at most one returns a non-nil match.
+    static func parseFamilySentinel(path: String) -> (requiredFamily: String?, requestPath: String) {
+        let prefix = "/_oi/family/"
+        guard path.hasPrefix(prefix) else {
+            return (nil, path)
+        }
+        let after = path.dropFirst(prefix.count)
+        if let slash = after.firstIndex(of: "/") {
+            let family = String(after[..<slash])
+            let rest = String(after[slash...])
+            if family.isEmpty {
+                return (nil, path)
+            }
+            return (family, rest)
+        }
+        let family = String(after)
+        if family.isEmpty {
+            return (nil, path)
+        }
+        return (family, "/")
     }
 
     static func reasonPhrase(for status: Int) -> String {

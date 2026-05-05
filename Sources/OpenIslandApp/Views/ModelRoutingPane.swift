@@ -1,5 +1,6 @@
 import SwiftUI
 import OpenIslandCore
+import os
 
 // MARK: - Pure state derivation (extracted for unit testability)
 //
@@ -140,6 +141,7 @@ struct ModelRoutingPane: View {
     /// directly — that one IS observable so the chip on the island
     /// pill re-renders simultaneously with this pane on switch.
     @State private var hasDeepseekKey: Bool = false
+    @State private var refreshTick: Int = 0
     @State private var pendingSwitch: UpstreamProfile?
     @State private var configuringProfile: UpstreamProfile?
     @State private var errorBanner: String?
@@ -291,6 +293,7 @@ struct ModelRoutingPane: View {
     }
 
     private var customSection: some View {
+        _ = refreshTick
         let custom = profileStore.allProfiles.filter(\.isCustom)
         if custom.isEmpty {
             return AnyView(EmptyView())
@@ -330,7 +333,11 @@ struct ModelRoutingPane: View {
         do {
             try profileStore.removeCustomProfile(id: profile.id)
             if let account = profile.keychainAccount {
-                try? credentialsStore.deleteCredential(for: account)
+                do {
+                    try credentialsStore.deleteCredential(for: account)
+                } catch {
+                    os_log(.error, "Failed to delete credential for profile %{public}@: %{public}@", profile.id, error.localizedDescription)
+                }
             }
             refreshState()
         } catch {
@@ -405,6 +412,7 @@ struct ModelRoutingPane: View {
     }
 
     private func refreshState() {
+        refreshTick &+= 1
         hasDeepseekKey = credentialsStore.hasCredential(for: "deepseek")
         // Health snapshot. Active profile = Anthropic Native means
         // the user's own credentials are in play; a degraded signal
@@ -790,6 +798,11 @@ private struct CustomProfileSheet: View {
     @State private var isTesting: Bool = false
     @State private var testResult: DeepSeekKeyValidator.Result?
     @State private var fetchError: String?
+    /// Escape hatch for advanced users on flaky networks: when checked,
+    /// allows saving even when the test returned `.networkError`
+    /// (no HTTP response from upstream). The key still goes to Keychain
+    /// unverified — caller accepts that the first real request may 401.
+    @State private var forceSaveOnNetworkError: Bool = false
 
     private var lang: LanguageManager { model.lang }
 
@@ -798,10 +811,27 @@ private struct CustomProfileSheet: View {
         guard !trimmed.isEmpty,
               let url = URL(string: trimmed),
               let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              url.host != nil, !(url.host ?? "").isEmpty
+              scheme == "https",
+              let host = url.host, !host.isEmpty,
+              !isPrivateOrLoopback(host: host)
         else { return nil }
         return url
+    }
+
+    private func isPrivateOrLoopback(host: String) -> Bool {
+        let lower = host.lowercased()
+        if lower == "localhost" || lower == "127.0.0.1" || lower == "::1" { return true }
+        if lower.hasSuffix(".internal") || lower.hasSuffix(".local") { return true }
+        let octets = lower.split(separator: ".").compactMap { UInt8($0) }
+        if octets.count == 4 {
+            if octets[0] == 10 { return true }
+            if octets[0] == 172, (16...31).contains(octets[1]) { return true }
+            if octets[0] == 192, octets[1] == 168 { return true }
+            if octets[0] == 169, octets[1] == 254 { return true }
+            if octets[0] == 100, (64...127).contains(octets[1]) { return true }
+            if octets[0] == 0 { return true }
+        }
+        return false
     }
 
     /// The URL we persist in the routing profile. If a user pastes an
@@ -823,7 +853,19 @@ private struct CustomProfileSheet: View {
         guard parsedURL != nil else { return false }
         guard keyText.count >= 20 else { return false }
         guard !effectiveModel.isEmpty else { return false }
-        return DeepSeekKeyValidator.saveAllowed(for: testResult)
+        if DeepSeekKeyValidator.saveAllowed(for: testResult) { return true }
+        // Force-save escape hatch: only valid when the failure was
+        // .networkError (no upstream contact). Other rejections —
+        // .invalidKey (401) or no test run — still block save.
+        if case .networkError = testResult, forceSaveOnNetworkError {
+            return true
+        }
+        return false
+    }
+
+    private var showsForceSaveToggle: Bool {
+        if case .networkError = testResult { return true }
+        return false
     }
 
     private var profileID: String {
@@ -972,6 +1014,14 @@ private struct CustomProfileSheet: View {
             // Test result
             if let testResult {
                 testResultRow(testResult)
+                if showsForceSaveToggle {
+                    Toggle(isOn: $forceSaveOnNetworkError) {
+                        Text("⚠️ 已知网络问题，仍强制保存（密钥未经验证，首次请求可能 401）")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    .toggleStyle(.checkbox)
+                }
             }
 
             // Actions
@@ -1038,11 +1088,19 @@ private struct CustomProfileSheet: View {
             isCustom: true,
             costMetadata: nil
         )
+        // Write credential first, then profile. If profile write fails,
+        // roll back the credential so we don't leave an orphaned key.
         do {
             try self.model.llmProxy.credentialsStore.setCredential(keyText, for: account)
+        } catch {
+            testResult = .networkError(message: error.localizedDescription)
+            return
+        }
+        do {
             try self.model.llmProxy.profileStore.addCustomProfile(profile)
             onSaved()
         } catch {
+            try? self.model.llmProxy.credentialsStore.deleteCredential(for: account)
             testResult = .networkError(message: error.localizedDescription)
         }
     }

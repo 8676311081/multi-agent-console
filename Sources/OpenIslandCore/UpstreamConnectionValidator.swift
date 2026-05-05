@@ -26,7 +26,7 @@ public struct UpstreamConnectionValidator: Sendable {
 
     public init(
         baseURL: URL,
-        timeout: TimeInterval = 10,
+        timeout: TimeInterval = 50,
         maxAttempts: Int = 3,
         session: URLSession? = nil
     ) {

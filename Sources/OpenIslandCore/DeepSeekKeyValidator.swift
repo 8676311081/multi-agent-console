@@ -53,7 +53,7 @@ public struct DeepSeekKeyValidator: Sendable {
     public init(
         endpointURL: URL = DeepSeekKeyValidator.defaultEndpointURL,
         session: URLSession = .shared,
-        timeout: TimeInterval = 10
+        timeout: TimeInterval = 50
     ) {
         self.endpointURL = endpointURL
         self.timeout = timeout
@@ -130,6 +130,12 @@ public struct DeepSeekKeyValidator: Sendable {
         case .valid, .rateLimited, .upstreamError, .timeout:
             return true
         case .invalidKey, .networkError:
+            // .networkError = no HTTP response at all (DNS, TLS,
+            // connection drop). The key was never validated against
+            // upstream — saving silently would let a typo'd key
+            // sit in Keychain and produce 401s on every later call.
+            // The CustomProfileSheet exposes a "force save anyway"
+            // checkbox for advanced users on flaky networks.
             return false
         }
     }

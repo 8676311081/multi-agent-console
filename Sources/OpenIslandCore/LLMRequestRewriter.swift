@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Audited mutations the proxy is allowed to make to an in-flight
 /// request. The proxy is otherwise an opaque forwarder — anything
@@ -74,6 +75,7 @@ public enum LLMRequestRewriter {
         streamOptions["include_usage"] = true
         json["stream_options"] = streamOptions
         guard let rewritten = try? JSONSerialization.data(withJSONObject: json) else {
+            os_log(.error, "LLMRequestRewriter: failed to re-serialize chat/completions body after modification")
             return body
         }
         return rewritten
@@ -138,12 +140,16 @@ public enum LLMRequestRewriter {
             // own key).
             return
         }
-        // `try?` flattens `throws -> String?` to `String?` (SE-0230),
-        // so a thrown Keychain error and a missing-key both surface
-        // as nil here. Both should fail-open: surfacing as a request
-        // failure would be worse UX than letting upstream 401 expose
-        // the misconfiguration.
+        // FAIL-CLOSED: this profile expects a stored key. If we
+        // can't read one (Keychain error, deleted credential, or
+        // empty value), STRIP the original Authorization header
+        // before forwarding. Otherwise the client's Anthropic OAuth
+        // token (or any other secret) would leak verbatim to a
+        // foreign upstream (DeepSeek, BuerAI, etc.). Upstream will
+        // 401 — loud and visible — instead of silently exfiltrating.
         guard let key = try? credentialsStore.credential(for: account), !key.isEmpty else {
+            os_log(.debug, "LLMRequestRewriter: no credential for account %{public}@, stripping Authorization header", account)
+            headers.removeAll { $0.name.lowercased() == "authorization" }
             return
         }
         let newValue = "Bearer \(key)"
@@ -230,6 +236,7 @@ public enum LLMRequestRewriter {
         }
         json["model"] = override
         guard let rewritten = try? JSONSerialization.data(withJSONObject: json) else {
+            os_log(.error, "LLMRequestRewriter: failed to re-serialize body after model rewrite")
             return body
         }
         return rewritten

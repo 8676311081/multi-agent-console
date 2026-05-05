@@ -95,10 +95,14 @@ struct LLMRequestRewriterAuthorizationTests {
     }
 
     @Test
-    func authorizationPassthroughWhenUpstreamIsDeepSeekButKeyMissing() {
-        // Fail-open: an upstream-side 401 is the loud signal we want.
-        // Silently sending an empty Bearer would mask the
-        // misconfiguration and confuse user debugging.
+    func authorizationStrippedWhenUpstreamIsDeepSeekButKeyMissing() {
+        // FAIL-CLOSED: when the profile expects a stored key but none
+        // is found, the original Authorization MUST be removed before
+        // forwarding. Otherwise the client's Anthropic OAuth token
+        // (sk-ant-USER) would leak verbatim to a foreign upstream
+        // (DeepSeek). Upstream's 401 from the missing key is loud
+        // and visible — the user can fix the misconfiguration without
+        // ever exfiltrating the secret.
         let store = makeStore() // no DeepSeek key
         var headers: [(name: String, value: String)] = [
             (name: "Authorization", value: "Bearer sk-ant-USER"),
@@ -109,7 +113,8 @@ struct LLMRequestRewriterAuthorizationTests {
             profileResolver: makeBuiltinResolver(),
             credentialsStore: store
         )
-        #expect(headers.first?.value == "Bearer sk-ant-USER")
+        // Authorization header MUST be absent post-rewrite.
+        #expect(!headers.contains(where: { $0.name.lowercased() == "authorization" }))
     }
 
     @Test
@@ -158,9 +163,10 @@ struct LLMRequestRewriterAuthorizationTests {
     @Test
     func emptyStoredKeyTreatedAsMissing() {
         // Defensive: if Keychain returns an empty string for the
-        // provider account (corruption / user typed a blank), we
-        // shouldn't actually emit `Authorization: Bearer ` — fail
-        // open just like the missing-key case.
+        // provider account (corruption / user typed a blank), it's
+        // treated identically to a missing key — fail-CLOSED, strip
+        // the original Authorization to prevent token leakage to
+        // the foreign upstream.
         let store = makeStore(["deepseek": ""])
         var headers: [(name: String, value: String)] = [
             (name: "Authorization", value: "Bearer original"),
@@ -171,6 +177,6 @@ struct LLMRequestRewriterAuthorizationTests {
             profileResolver: makeBuiltinResolver(),
             credentialsStore: store
         )
-        #expect(headers.first?.value == "Bearer original")
+        #expect(!headers.contains(where: { $0.name.lowercased() == "authorization" }))
     }
 }
